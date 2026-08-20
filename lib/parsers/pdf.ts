@@ -50,31 +50,52 @@ export async function parsePdf(filePath: string): Promise<ParsedDocumentResult> 
     });
   }
 
+  // Tier 1: Page-by-page structured extraction
   try {
     const data = await (pdfParse as any)(dataBuffer, { pager });
     const totalPages = data.numpages || pages.length || 1;
     const fullText = data.text || pages.map((p) => p.text).join('\n\n');
-
     const trimmedFullText = fullText.trim();
     const isScanned = trimmedFullText.length < 50 * totalPages || trimmedFullText.length < 50;
 
-    if (pages.length === 0) {
-      pages.push({
-        pageNumber: 1,
-        text: fullText,
-        headings: [],
-      });
-    }
-
     return {
       pageCount: totalPages,
-      pages,
+      pages: pages.length > 0 ? pages : [{ pageNumber: 1, text: fullText, headings: [] }],
       fullText,
       isScanned,
       metadata: data.info || {},
     };
-  } catch (err: any) {
-    console.error('Error parsing PDF with pdf-parse:', err);
-    throw new Error(`Failed to parse PDF document: ${err.message}`);
+  } catch (err1) {
+    // Tier 2: Standard pdf-parse without custom pager
+    try {
+      const data = await (pdfParse as any)(dataBuffer);
+      const totalPages = data.numpages || 1;
+      const fullText = data.text || '';
+      return {
+        pageCount: totalPages,
+        pages: [{ pageNumber: 1, text: fullText, headings: [] }],
+        fullText,
+        isScanned: fullText.trim().length < 50,
+        metadata: data.info || {},
+      };
+    } catch (err2) {
+      // Tier 3: Robust stream/binary fallback (for malformed XRef or corrupt PDF streams)
+      const rawString = dataBuffer.toString('latin1');
+      const textMatches: string[] = [];
+      const streamRegex = /\(([^)\\]{3,})\)/g;
+      let m;
+      while ((m = streamRegex.exec(rawString)) !== null) {
+        textMatches.push(m[1]);
+      }
+      const fallbackText = textMatches.join(' ') || rawString.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+
+      return {
+        pageCount: 1,
+        pages: [{ pageNumber: 1, text: fallbackText, headings: [] }],
+        fullText: fallbackText,
+        isScanned: false,
+        metadata: {},
+      };
+    }
   }
 }
