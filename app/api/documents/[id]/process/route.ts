@@ -58,7 +58,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     if (fullText.trim().length > 30) {
       try {
-        const ai = await getAIProvider();
+        const apiKeyHeader = req.headers.get('x-api-key') || undefined;
+        const providerHeader = req.headers.get('x-provider') || undefined;
+        const modelHeader = req.headers.get('x-model') || undefined;
+        const baseUrlHeader = req.headers.get('x-base-url') || undefined;
+
+        const ai = await getAIProvider({
+          apiKey: apiKeyHeader,
+          provider: providerHeader,
+          model: modelHeader,
+          baseUrl: baseUrlHeader,
+        });
 
         // A. Generate 3 Comprehensive Deep Notes (Study Notes, Deep Analysis, Quality & Error Audit)
         const notesPrompt = PROMPTS.DOCUMENT_DEEP_NOTES_AND_AUDIT(doc.filename, fullText.slice(0, 25000));

@@ -184,6 +184,21 @@ export default function ChatStudioWorkspace() {
     }
   };
 
+  const getClientHeaders = () => {
+    const apiKey = typeof window !== 'undefined' ? localStorage.getItem('synapse_api_key') || '' : '';
+    const provider = typeof window !== 'undefined' ? localStorage.getItem('synapse_provider') || 'openrouter' : 'openrouter';
+    const model = typeof window !== 'undefined' ? localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free' : 'openai/gpt-oss-20b:free';
+    const baseUrl = typeof window !== 'undefined' ? localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1' : 'https://openrouter.ai/api/v1';
+
+    return {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'x-provider': provider,
+      'x-model': model,
+      'x-base-url': baseUrl,
+    };
+  };
+
   // Upload Handlers
   const handleUploadFiles = async (files: FileList) => {
     if (!activeNotebookId) return;
@@ -207,7 +222,10 @@ export default function ChatStudioWorkspace() {
           setDocuments((prev) => [newDoc, ...prev]);
 
           // Trigger lightweight background indexing
-          await fetch(`/api/documents/${newDoc.id}/process`, { method: 'POST' });
+          await fetch(`/api/documents/${newDoc.id}/process`, {
+            method: 'POST',
+            headers: getClientHeaders(),
+          });
           if (activeNotebookId) {
             loadNotebook(activeNotebookId);
           }

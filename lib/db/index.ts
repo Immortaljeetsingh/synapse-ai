@@ -12,25 +12,31 @@ try {
     fs.mkdirSync(DB_DIR, { recursive: true });
   }
 } catch (e) {
-  console.warn('Could not create DB_DIR, using in-memory SQLite:', e);
+  // Gracefully handle read-only environments
 }
 
 let dbInstance: Database | null = null;
 let sqlPromise: Promise<any> | null = null;
+let wasmBinaryBuffer: ArrayBuffer | null = null;
 
 async function getSqlJs() {
   if (!sqlPromise) {
-    sqlPromise = initSqlJs({
-      locateFile: (file: string) => {
-        // In local development, try local path first
-        const localWasm = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
-        if (fs.existsSync(localWasm)) {
-          return localWasm;
-        }
-        // Fallback for Vercel / serverless cloud environments
-        return `https://sql.js.org/dist/${file}`;
-      },
-    });
+    sqlPromise = (async () => {
+      const localWasm = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+      if (fs.existsSync(localWasm)) {
+        return initSqlJs();
+      }
+
+      // Fetch wasm binary remotely into memory for Vercel serverless / AWS Lambda
+      if (!wasmBinaryBuffer) {
+        const wasmRes = await fetch('https://sql.js.org/dist/sql-wasm.wasm');
+        wasmBinaryBuffer = await wasmRes.arrayBuffer();
+      }
+
+      return initSqlJs({
+        wasmBinary: wasmBinaryBuffer,
+      });
+    })();
   }
   return sqlPromise;
 }
