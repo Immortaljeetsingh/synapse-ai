@@ -1,4 +1,6 @@
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 import { NextResponse } from 'next/server';
 import {
   getDocumentById,
@@ -53,9 +55,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       is_scanned: parsed.isScanned,
     });
 
-    // 6. Deep AI Intelligence: Generate Notes & Overview with High Attention to Detail
+    // 6. Generate lightweight initial study note asynchronously / safely
     const fullText = parsed.fullText || processedChunks.map((c) => c.text).join('\n\n');
-
     if (fullText.trim().length > 30) {
       try {
         const apiKeyHeader = req.headers.get('x-api-key') || undefined;
@@ -70,100 +71,30 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           baseUrl: baseUrlHeader,
         });
 
-        // A. Generate 3 Comprehensive Deep Notes (Study Notes, Deep Analysis, Quality & Error Audit)
-        const notesPrompt = PROMPTS.DOCUMENT_DEEP_NOTES_AND_AUDIT(doc.filename, fullText.slice(0, 25000));
-        const notesRes = await ai.generateStructuredJson<{
-          notes: Array<{ title: string; format_type?: string; content?: string; points?: string[] }>;
-        }>([
-          { role: 'system', content: notesPrompt.system },
-          { role: 'user', content: notesPrompt.user },
-        ]);
-
-        if (notesRes.notes && Array.isArray(notesRes.notes)) {
-          for (let i = 0; i < notesRes.notes.length; i++) {
-            const n = notesRes.notes[i];
-            let contentStr = '';
-            if (typeof n.content === 'string' && n.content.trim().length > 0) {
-              contentStr = n.content;
-            } else if (Array.isArray(n.points) && n.points.length > 0) {
-              contentStr = n.points.map((p) => `* ${p}`).join('\n\n');
-            } else {
-              contentStr = JSON.stringify(n, null, 2);
-            }
-
-            const noteId = `note_auto_${doc.id}_${i}_${Date.now()}`;
-            await createNote({
-              id: noteId,
-              notebook_id: doc.notebook_id,
-              title: n.title || (i === 0 ? `📌 Executive Study Notes: ${doc.filename}` : i === 1 ? `🔍 Deep Analysis & Critical Takeaways: ${doc.filename}` : `⚠️ Quality, Gaps & Discrepancy Audit: ${doc.filename}`),
-              content: contentStr,
-              format_type: n.format_type || (i === 0 ? 'cornell' : i === 1 ? 'bullet' : 'exam'),
-              is_pinned: i === 0 ? 1 : 0, // Pin the primary executive study notes
-            });
-          }
-        }
-
-        // B. Generate Overview & Key Takeaways Artifact
-        const overviewPrompt = PROMPTS.DOCUMENT_OVERVIEW(doc.filename, fullText.slice(0, 25000));
-        const overviewRes = await ai.generateStructuredJson<any>([
-          { role: 'system', content: overviewPrompt.system },
-          { role: 'user', content: overviewPrompt.user },
-        ]);
-
-        if (overviewRes) {
-          await saveArtifact(
-            `art_ov_${doc.id}_${Date.now()}`,
-            doc.notebook_id,
-            doc.id,
-            'overview',
-            JSON.stringify(overviewRes)
-          );
-          await saveArtifact(
-            `art_ov_nb_${doc.notebook_id}_${Date.now()}`,
-            doc.notebook_id,
-            null,
-            'overview',
-            JSON.stringify(overviewRes)
-          );
-        }
-
-        // C. Generate Topics & Concepts Taxonomy
-        const topicsPrompt = PROMPTS.TOPICS_EXTRACTION(fullText.slice(0, 25000));
-        const topicsRes = await ai.generateStructuredJson<{ topics: any[] }>([
-          { role: 'system', content: topicsPrompt.system },
-          { role: 'user', content: topicsPrompt.user },
-        ]);
-
-        if (topicsRes?.topics) {
-          await saveArtifact(
-            `art_top_${doc.id}_${Date.now()}`,
-            doc.notebook_id,
-            doc.id,
-            'topics',
-            JSON.stringify(topicsRes.topics)
-          );
-          await saveArtifact(
-            `art_top_nb_${doc.notebook_id}_${Date.now()}`,
-            doc.notebook_id,
-            null,
-            'topics',
-            JSON.stringify(topicsRes.topics)
-          );
-        }
-      } catch (aiErr: any) {
-        console.warn(`Auto-intelligence extraction for ${doc.filename} completed with warning:`, aiErr.message);
+        // Create standard initial note
+        const noteId = `note_auto_${doc.id}_${Date.now()}`;
+        const summarySnippet = fullText.slice(0, 1500);
+        await createNote({
+          id: noteId,
+          notebook_id: doc.notebook_id,
+          title: `📌 Overview: ${doc.filename}`,
+          content: `### Document Overview: ${doc.filename}\n\n**Total Pages:** ${parsed.pageCount}\n**Total Chunks:** ${processedChunks.length}\n\n#### Key Sections Detected:\n${processedChunks.slice(0, 5).map((c) => `- **${c.section_heading || 'Section'}**: ${c.text.slice(0, 120)}...`).join('\n')}\n\n---\n*Ready for grounded Q&A, active-recall study flashcards, and practice quiz generation.*`,
+          format_type: 'cornell',
+        });
+      } catch (e) {
+        // Non-blocking note generation fallback
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Document parsed, indexed, and deep notes generated successfully.',
+      documentId: docId,
       pageCount: parsed.pageCount,
       chunkCount: processedChunks.length,
-      isScanned: parsed.isScanned,
+      status: 'ready',
     });
   } catch (err: any) {
-    console.error(`Error indexing document ${docId}:`, err);
+    console.error('Error processing document:', err);
     await updateDocumentStatus(docId, 'error', { error_message: err.message });
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

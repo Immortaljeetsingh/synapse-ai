@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 import { NextResponse } from 'next/server';
 import { createNote, getChunksByNotebook, getDocumentsByNotebook } from '@/lib/db/queries';
 import { getAIProvider, PROMPTS } from '@/lib/ai';
