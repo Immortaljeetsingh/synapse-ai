@@ -253,6 +253,7 @@ export default function ChatStudioWorkspace() {
         body: JSON.stringify({
           notebookId: activeNotebookId,
           message: msg,
+          documents: documents,
         }),
       });
       const data = await res.json();
@@ -439,6 +440,7 @@ export default function ChatStudioWorkspace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           notebookId: activeNotebookId,
+          documents: documents,
           ...config,
         }),
       });

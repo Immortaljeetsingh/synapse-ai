@@ -134,12 +134,31 @@ export async function POST(req: Request) {
     let specialPayload: any = null;
     let retrievedChunksForResponse: any[] = [];
 
+    // Extract external client chunks if passed in serverless environment
+    let externalChunks: any[] = [];
+    if (Array.isArray(body.chunks)) {
+      externalChunks = body.chunks;
+    } else if (Array.isArray(body.documents)) {
+      for (const d of body.documents) {
+        if (Array.isArray(d.chunks)) {
+          externalChunks.push(...d.chunks);
+        }
+      }
+    } else if (Array.isArray(body.activeDocuments)) {
+      for (const d of body.activeDocuments) {
+        if (Array.isArray(d.chunks)) {
+          externalChunks.push(...d.chunks);
+        }
+      }
+    }
+
     // 2. Handle Intents
 
     // A. DEEP RESEARCH & ANALYTICAL REPORT (Multi-Stage Subtopic Retrieval)
     if (intentData.intent === 'deep_research') {
       const deepRetrieval = await multiStageDeepRetrieve(notebookId, message, {
         documentFilterId,
+        externalChunks,
       });
 
       retrievedChunksForResponse = deepRetrieval.chunks;
@@ -177,6 +196,7 @@ export async function POST(req: Request) {
         topK: 8,
         documentFilterId,
         minScore: 0.02,
+        externalChunks,
       });
       retrievedChunksForResponse = retrieval.chunks;
       citations = retrieval.citations;
@@ -226,6 +246,7 @@ export async function POST(req: Request) {
         topK: 10,
         documentFilterId,
         minScore: 0.02,
+        externalChunks,
       });
       retrievedChunksForResponse = retrieval.chunks;
       citations = retrieval.citations;
@@ -297,6 +318,7 @@ export async function POST(req: Request) {
     else if (intentData.intent === 'notes' || intentData.intent === 'summary') {
       const retrieval = await multiStageDeepRetrieve(notebookId, message, {
         documentFilterId,
+        externalChunks,
       });
       retrievedChunksForResponse = retrieval.chunks;
       citations = retrieval.citations;
@@ -332,6 +354,7 @@ export async function POST(req: Request) {
         topK: 6,
         documentFilterId,
         minScore: 0.02,
+        externalChunks,
       });
       retrievedChunksForResponse = retrieval.chunks;
       citations = retrieval.citations;

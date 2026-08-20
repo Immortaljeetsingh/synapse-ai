@@ -61,12 +61,21 @@ function tokenize(text: string): string[] {
 export async function hybridRetrieve(
   notebookId: string,
   query: string,
-  options: { topK?: number; documentFilterId?: string; minScore?: number; subtopicName?: string } = {}
+  options: {
+    topK?: number;
+    documentFilterId?: string;
+    minScore?: number;
+    subtopicName?: string;
+    externalChunks?: any[];
+  } = {}
 ): Promise<RetrievalResult> {
   const topK = options.topK || 12;
   const minScore = options.minScore || 0.02;
 
-  let allChunks = await getChunksByNotebook(notebookId);
+  let allChunks = options.externalChunks && options.externalChunks.length > 0
+    ? [...options.externalChunks]
+    : await getChunksByNotebook(notebookId);
+
   if (options.documentFilterId) {
     allChunks = allChunks.filter((c) => c.document_id === options.documentFilterId);
   }
@@ -223,7 +232,7 @@ export async function hybridRetrieve(
 export async function multiStageDeepRetrieve(
   notebookId: string,
   userQuery: string,
-  options: { documentFilterId?: string } = {}
+  options: { documentFilterId?: string; externalChunks?: any[] } = {}
 ): Promise<RetrievalResult> {
   // Define comprehensive analytical passes
   const subtopicPasses = [
@@ -279,6 +288,7 @@ export async function multiStageDeepRetrieve(
     topK: 8,
     documentFilterId: options.documentFilterId,
     minScore: 0.01,
+    externalChunks: options.externalChunks,
   });
   primaryResult.chunks.forEach((c) => allFoundChunks.set(c.chunkId, c));
 
@@ -291,6 +301,7 @@ export async function multiStageDeepRetrieve(
         documentFilterId: options.documentFilterId,
         minScore: 0.02,
         subtopicName: pass.name,
+        externalChunks: options.externalChunks,
       });
 
       for (const chunk of res.chunks) {

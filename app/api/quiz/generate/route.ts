@@ -33,7 +33,13 @@ export async function POST(req: Request) {
 
     // 1. Fetch relevant chunks based on source selection
     let chunks: any[] = [];
-    if (documentId) {
+    if (Array.isArray(body.chunks) && body.chunks.length > 0) {
+      chunks = body.chunks;
+    } else if (Array.isArray(body.documents) && body.documents.length > 0) {
+      for (const d of body.documents) {
+        if (Array.isArray(d.chunks)) chunks.push(...d.chunks);
+      }
+    } else if (documentId) {
       chunks = await getChunksByDocument(documentId);
     } else {
       chunks = await getChunksByNotebook(notebookId);
