@@ -56,18 +56,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     try {
       const res = await fetch('/api/settings');
       const data = await res.json();
+      let p = 'openrouter';
+      let m = 'openai/gpt-oss-20b:free';
+      let b = 'https://openrouter.ai/api/v1';
+
       if (data.success && data.settings) {
-        setProvider(data.settings.provider || localStorage.getItem('synapse_provider') || 'openrouter');
-        setModel(data.settings.model || localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free');
-        setBaseUrl(data.settings.baseUrl || localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1');
+        p = data.settings.provider || localStorage.getItem('synapse_provider') || 'openrouter';
+        m = data.settings.model || localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free';
+        b = data.settings.baseUrl || localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1';
       } else {
-        const lp = localStorage.getItem('synapse_provider');
-        const lm = localStorage.getItem('synapse_model');
-        const lb = localStorage.getItem('synapse_base_url');
-        if (lp) setProvider(lp);
-        if (lm) setModel(lm);
-        if (lb) setBaseUrl(lb);
+        p = localStorage.getItem('synapse_provider') || 'openrouter';
+        m = localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free';
+        b = localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1';
       }
+
+      // Auto-correct any mismatched legacy opencodezen URL when OpenRouter is selected
+      if (p === 'openrouter' && (b.includes('opencodezen') || m.includes('deepseek-v4-flash-max'))) {
+        b = 'https://openrouter.ai/api/v1';
+        m = 'openai/gpt-oss-20b:free';
+        localStorage.setItem('synapse_base_url', b);
+        localStorage.setItem('synapse_model', m);
+      }
+
+      setProvider(p);
+      setModel(m);
+      setBaseUrl(b);
+
       const localKey = localStorage.getItem('synapse_api_key');
       if (localKey) {
         setApiKey(localKey);
@@ -185,10 +199,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div className="grid grid-cols-3 gap-1.5">
               {[
                 { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-oss-20b:free' },
+                { id: 'opencode_zen', name: 'OpenCode Zen', url: 'https://api.opencodezen.com/v1', defaultModel: 'deepseek-v4-flash-max' },
                 { id: 'openai', name: 'OpenAI', url: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
                 { id: 'groq', name: 'Groq Cloud', url: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
                 { id: 'deepseek', name: 'DeepSeek', url: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
-                { id: 'together', name: 'Together AI', url: 'https://api.together.xyz/v1', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
                 { id: 'ollama', name: 'Ollama (Local)', url: 'http://localhost:11434/v1', defaultModel: 'llama3.2' },
               ].map((p) => {
                 const isSelected = provider === p.id;
@@ -223,6 +237,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 if (e.target.value === 'openrouter') {
                   setBaseUrl('https://openrouter.ai/api/v1');
                   setModel('openai/gpt-oss-20b:free');
+                } else if (e.target.value === 'opencode_zen') {
+                  setBaseUrl('https://api.opencodezen.com/v1');
+                  setModel('deepseek-v4-flash-max');
                 } else if (e.target.value === 'openai') {
                   setBaseUrl('https://api.openai.com/v1');
                   setModel('gpt-4o-mini');
@@ -243,6 +260,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-200 focus:outline-none focus:border-neutral-600"
             >
               <option value="openrouter">OpenRouter (Any open model)</option>
+              <option value="opencode_zen">OpenCode Zen (deepseek-v4-flash-max)</option>
               <option value="openai">OpenAI (GPT-4o, GPT-4o-mini, etc.)</option>
               <option value="groq">Groq Cloud (Fast Llama 3.3, Mixtral)</option>
               <option value="deepseek">DeepSeek API (deepseek-chat, deepseek-reasoner)</option>

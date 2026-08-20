@@ -4,9 +4,9 @@ import { getSetting, setSetting } from '@/lib/db/queries';
 
 export async function GET() {
   try {
-    const provider = await getSetting('ai_provider', process.env.AI_PROVIDER || 'opencode_zen');
-    const model = await getSetting('ai_model', process.env.AI_MODEL || 'deepseek-v4-flash-max');
-    const baseUrl = await getSetting('ai_base_url', process.env.AI_BASE_URL || 'https://api.opencodezen.com/v1');
+    const provider = await getSetting('ai_provider', process.env.AI_PROVIDER || 'openrouter');
+    const model = await getSetting('ai_model', process.env.AI_MODEL || 'openai/gpt-oss-20b:free');
+    const baseUrl = await getSetting('ai_base_url', process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1');
     const hasApiKey = Boolean(await getSetting('ai_api_key', process.env.AI_API_KEY || ''));
 
     return NextResponse.json({
