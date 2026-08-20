@@ -119,9 +119,24 @@ export async function POST(req: Request) {
       format_type: 'cornell',
     });
 
+    // 6. Return lightweight chunks without heavy embedding vectors (drops payload from 10MB to 15KB)
+    const lightweightChunks = processedChunks.map((c) => ({
+      id: c.id,
+      document_id: docId,
+      notebook_id: notebookId,
+      chunk_index: c.chunk_index,
+      page_number: c.page_number,
+      section_heading: c.section_heading,
+      text: c.text,
+      filename: rawFilename,
+    }));
+
     return NextResponse.json({
       success: true,
-      document,
+      document: {
+        ...document,
+        chunks: lightweightChunks,
+      },
       chunkCount: processedChunks.length,
       pageCount: parsed.pageCount,
     });

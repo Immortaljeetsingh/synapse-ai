@@ -72,9 +72,19 @@ export async function hybridRetrieve(
   const topK = options.topK || 12;
   const minScore = options.minScore || 0.02;
 
-  let allChunks = options.externalChunks && options.externalChunks.length > 0
-    ? [...options.externalChunks]
-    : await getChunksByNotebook(notebookId);
+  let allChunks: any[] = [];
+  if (options.externalChunks && options.externalChunks.length > 0) {
+    allChunks = options.externalChunks.map((c) => ({
+      ...c,
+      document_id: c.document_id || 'doc',
+      notebook_id: notebookId,
+      filename: c.filename || 'Document',
+      document_name: c.filename || 'Document',
+      embedding_json: c.embedding_json || JSON.stringify(computeTextVector(c.text + ' ' + (c.section_heading || ''))),
+    }));
+  } else {
+    allChunks = await getChunksByNotebook(notebookId);
+  }
 
   if (options.documentFilterId) {
     allChunks = allChunks.filter((c) => c.document_id === options.documentFilterId);
