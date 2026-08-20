@@ -3,11 +3,16 @@ import path from 'path';
 import fs from 'fs';
 import { DB_SCHEMA } from './schema';
 
-const DB_DIR = path.join(process.cwd(), 'data');
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NEXT_RUNTIME === 'nodejs');
+const DB_DIR = isServerless ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DB_DIR, 'app.db');
 
-if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Could not create DB_DIR, using in-memory SQLite:', e);
 }
 
 let dbInstance: Database | null = null;
@@ -25,18 +30,28 @@ export async function getDb(): Promise<Database> {
 
   const SQL = await getSqlJs();
   let db: Database;
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const fileBuffer = fs.readFileSync(DB_PATH);
+      db = new SQL.Database(fileBuffer);
+    } else {
+      db = new SQL.Database();
+    }
+  } catch {
     db = new SQL.Database();
   }
 
   // Execute schema
-  db.run(DB_SCHEMA);
+  try {
+    db.run(DB_SCHEMA);
+  } catch (err) {
+    console.error('Error running DB_SCHEMA:', err);
+  }
+
   try {
     db.run(`ALTER TABLE chat_messages ADD COLUMN special_payload_json TEXT;`);
   } catch {}
+
   dbInstance = db;
   saveDb();
   return dbInstance;
@@ -49,6 +64,6 @@ export function saveDb(): void {
     const buffer = Buffer.from(data);
     fs.writeFileSync(DB_PATH, buffer);
   } catch (err) {
-    console.error('Error saving SQLite database to disk:', err);
+    // In serverless environments, writing to disk may fail or be ephemeral; in-memory db continues to work
   }
 }

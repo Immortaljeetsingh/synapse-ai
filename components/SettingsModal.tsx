@@ -113,13 +113,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   Local Engine (Offline)
                 </span>
               ) : (
-                <span className="text-rose-400 flex items-center gap-1 font-mono text-[11px]">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  {healthStatus?.error ? 'Error / Rate Limited' : 'Connection Failed'}
+                <span className="text-rose-400 flex items-center gap-1 font-mono text-[11px] max-w-xs truncate" title={healthStatus?.error || 'Connection Failed'}>
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{healthStatus?.error ? (healthStatus.error.includes('401') ? 'Invalid API Key (401)' : healthStatus.error.includes('429') ? 'Rate Limited (429) - Retry in a few sec' : healthStatus.error.slice(0, 45)) : 'Connection Failed'}</span>
                 </span>
               )}
             </div>
-            <div className="text-[10px] text-neutral-500 font-mono">
+            <div className="text-[10px] text-neutral-500 font-mono truncate max-w-sm">
               Model: {model} • {baseUrl}
             </div>
           </div>
