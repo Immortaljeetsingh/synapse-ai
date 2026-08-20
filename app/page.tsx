@@ -12,6 +12,7 @@ import {
   BookOpen,
   Columns,
   Cpu,
+  Menu,
 } from 'lucide-react';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
@@ -58,6 +59,7 @@ export default function ChatStudioWorkspace() {
 
   // UI Panels State
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isCompanionOpen, setIsCompanionOpen] = useState(false);
   const [activeCompanionTab, setActiveCompanionTab] = useState<CompanionTab>('overview');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -475,20 +477,31 @@ export default function ChatStudioWorkspace() {
         onOpenLibrary={() => setIsLibraryOpen(true)}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* 2. Central Conversational Chat Workspace */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        {/* Top Chat Bar with Title & Companion Toggle */}
-        <div className="h-12 border-b border-neutral-800/80 glass px-4 sm:px-6 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
+        {/* Top Header Bar */}
+        <div className="h-12 border-b border-neutral-200 dark:border-neutral-800/80 glass px-3 sm:px-6 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            {/* Mobile Hamburger Button */}
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="md:hidden p-1.5 rounded-xl text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-850 transition-colors shrink-0"
+              title="Open Navigation Menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
             <SynapseLogo size="xs" />
-            <h2 className="text-xs font-bold text-neutral-200 truncate">
+            <h2 className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-neutral-200 truncate">
               {activeNotebook?.title || 'SYNAPSE AI Research Workspace'}
             </h2>
-            <div className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] text-neutral-500 font-mono">
+            <div className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-[10px] text-neutral-500 font-mono">
               <Cpu className="w-3 h-3 text-neutral-400" />
-              <span>GPT-OSS 20B • 200k Context</span>
+              <span>GPT-OSS 20B</span>
             </div>
           </div>
 
@@ -497,13 +510,14 @@ export default function ChatStudioWorkspace() {
             onClick={() => setIsCompanionOpen((prev) => !prev)}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
               isCompanionOpen
-                ? 'bg-neutral-700 text-white shadow-3d-sm'
-                : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 border border-neutral-800'
+                ? 'bg-neutral-800 dark:bg-neutral-700 text-white shadow-3d-sm'
+                : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-400 border border-neutral-300 dark:border-neutral-800'
             }`}
             title={isCompanionOpen ? 'Hide Studio Tools' : 'Open Studio Tools'}
           >
             <PanelRight className="w-3.5 h-3.5" />
-            <span>Studio Tools</span>
+            <span className="hidden sm:inline">Studio Tools</span>
+            <span className="sm:hidden">Tools</span>
           </button>
         </div>
 

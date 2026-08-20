@@ -112,12 +112,12 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
 
   return (
     <div
-      className={`h-screen border-l border-neutral-800 bg-neutral-950 flex flex-col transition-all duration-300 select-none z-30 shrink-0 ${
-        isExpanded ? 'w-full sm:w-[760px]' : 'w-full sm:w-[480px] lg:w-[520px]'
+      className={`fixed inset-0 z-40 md:relative md:z-30 h-screen border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 flex flex-col transition-all duration-300 select-none shrink-0 ${
+        isExpanded ? 'w-full md:w-[680px] lg:w-[760px]' : 'w-full md:w-[440px] lg:w-[500px]'
       }`}
     >
       {/* Top Header Bar with Tab Strip */}
-      <div className="p-3 border-b border-neutral-800 bg-neutral-900/60 glass flex items-center justify-between gap-2">
+      <div className="p-3 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/80 dark:bg-neutral-900/60 glass flex items-center justify-between gap-2">
         {/* Scrollable Tab Strip */}
         <div className="flex items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
           {tabButtons.map((tab) => {
@@ -129,11 +129,11 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
                 onClick={() => onSelectTab(tab.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 ${
                   isActive
-                    ? 'bg-neutral-800 text-neutral-100 border border-neutral-700 shadow-3d-sm'
-                    : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900'
+                    ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 border border-neutral-300 dark:border-neutral-700 shadow-3d-sm'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900'
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-neutral-200' : 'text-neutral-600'}`} />
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-neutral-800 dark:text-neutral-200' : 'text-neutral-400 dark:text-neutral-600'}`} />
                 <span>{tab.label}</span>
               </button>
             );
@@ -144,7 +144,7 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => setIsExpanded((prev) => !prev)}
-            className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+            className="hidden md:inline-flex p-1.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
             title={isExpanded ? 'Collapse Width' : 'Expand Width'}
           >
             {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -152,7 +152,7 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+            className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
             title="Close Panel"
           >
             <X className="w-4 h-4" />
