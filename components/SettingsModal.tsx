@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, Check, Server, Shield, Cpu, RefreshCw, Key, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { SynapseLogo } from '@/components/brand/SynapseLogo';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
@@ -20,14 +20,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadSettings();
-      checkHealth();
-    }
-  }, [isOpen]);
+  const checkHealth = useCallback(
+    async (customConfig?: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => {
+      setIsCheckingHealth(true);
+      try {
+        const activeKey =
+          customConfig?.apiKey ??
+          (apiKey && apiKey !== '********' ? apiKey : localStorage.getItem('synapse_api_key') || '');
+        const activeProvider = customConfig?.provider ?? provider;
+        const activeModel = customConfig?.model ?? model;
+        const activeBaseUrl = customConfig?.baseUrl ?? baseUrl;
 
-  const loadSettings = async () => {
+        const res = await fetch('/api/ai/health', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: activeProvider,
+            model: activeModel,
+            apiKey: activeKey,
+            baseUrl: activeBaseUrl,
+          }),
+        });
+        const data = await res.json();
+        setHealthStatus(data);
+      } catch (e: any) {
+        setHealthStatus({ status: 'error', error: e.message });
+      } finally {
+        setIsCheckingHealth(false);
+      }
+    },
+    [apiKey, provider, model, baseUrl]
+  );
+
+  const loadSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/settings');
       const data = await res.json();
@@ -50,34 +75,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     } catch (e) {
       console.error('Error loading settings:', e);
     }
-  };
+  }, []);
 
-  const checkHealth = async (customConfig?: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => {
-    setIsCheckingHealth(true);
-    try {
-      const activeKey = customConfig?.apiKey ?? (apiKey && apiKey !== '********' ? apiKey : (localStorage.getItem('synapse_api_key') || ''));
-      const activeProvider = customConfig?.provider ?? provider;
-      const activeModel = customConfig?.model ?? model;
-      const activeBaseUrl = customConfig?.baseUrl ?? baseUrl;
-
-      const res = await fetch('/api/ai/health', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: activeProvider,
-          model: activeModel,
-          apiKey: activeKey,
-          baseUrl: activeBaseUrl,
-        }),
-      });
-      const data = await res.json();
-      setHealthStatus(data);
-    } catch (e: any) {
-      setHealthStatus({ status: 'error', error: e.message });
-    } finally {
-      setIsCheckingHealth(false);
+  useEffect(() => {
+    if (isOpen) {
+      loadSettings();
+      checkHealth();
     }
-  };
+  }, [isOpen, loadSettings, checkHealth]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,7 +162,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
 
           <button
-            onClick={checkHealth}
+            onClick={() => checkHealth()}
             disabled={isCheckingHealth}
             className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 text-xs transition-colors shadow-3d-sm"
             title="Refresh Health"
