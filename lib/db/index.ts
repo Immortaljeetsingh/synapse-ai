@@ -22,12 +22,25 @@ let wasmBinaryBuffer: ArrayBuffer | null = null;
 async function getSqlJs() {
   if (!sqlPromise) {
     sqlPromise = (async () => {
-      const localWasm = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
-      if (fs.existsSync(localWasm)) {
-        return initSqlJs();
+      // Check multiple candidate local paths
+      const candidates = [
+        path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+        path.join(process.cwd(), '.next', 'server', 'chunks', 'sql-wasm.wasm'),
+        path.join(__dirname, 'sql-wasm.wasm'),
+        path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+      ];
+
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          try {
+            const buf = fs.readFileSync(p);
+            const arrayBuf = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+            return initSqlJs({ wasmBinary: arrayBuf });
+          } catch {}
+        }
       }
 
-      // Fetch wasm binary remotely into memory for Vercel serverless / AWS Lambda
+      // Fetch wasm remotely into buffer for Vercel / serverless environments
       if (!wasmBinaryBuffer) {
         const wasmRes = await fetch('https://sql.js.org/dist/sql-wasm.wasm');
         wasmBinaryBuffer = await wasmRes.arrayBuffer();

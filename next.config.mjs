@@ -2,6 +2,9 @@
 const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['sql.js', 'pdf-parse', 'mammoth', 'xlsx'],
+    outputFileTracingIncludes: {
+      '/api/**/*': ['./node_modules/sql.js/dist/sql-wasm.wasm'],
+    },
   },
   webpack: (config, { isServer }) => {
     config.resolve.fallback = {
