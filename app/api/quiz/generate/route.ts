@@ -39,6 +39,35 @@ export async function POST(req: Request) {
     }
 
     if (chunks.length === 0) {
+      try {
+        const { getDocumentsByNotebook, insertChunks } = await import('@/lib/db/queries');
+        const { parseDocument } = await import('@/lib/parsers');
+        const { chunkDocument } = await import('@/lib/rag/chunker');
+        const { computeTextVector } = await import('@/lib/rag/embeddings');
+        const fs = await import('fs');
+
+        const docs = await getDocumentsByNotebook(notebookId);
+        for (const doc of docs) {
+          if (doc.file_path && fs.existsSync(doc.file_path)) {
+            const parsed = await parseDocument(doc.file_path, doc.filename);
+            const rawChunks = chunkDocument(parsed, doc.id, doc.notebook_id, doc.filename, {
+              targetChunkSize: 900,
+              overlapSize: 120,
+            });
+            const processedChunks = rawChunks.map((chunk) => ({
+              ...chunk,
+              embedding_json: JSON.stringify(computeTextVector(chunk.text + ' ' + chunk.section_heading)),
+            }));
+            await insertChunks(processedChunks);
+            chunks.push(...processedChunks);
+          }
+        }
+      } catch (e) {
+        console.warn('Quiz fallback chunking error:', e);
+      }
+    }
+
+    if (chunks.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No indexed source documents found in this notebook.' },
         { status: 400 }
@@ -63,6 +92,18 @@ export async function POST(req: Request) {
       }
     }
 
+    const apiKeyHeader = req.headers.get('x-api-key') || undefined;
+    const providerHeader = req.headers.get('x-provider') || undefined;
+    const modelHeader = req.headers.get('x-model') || undefined;
+    const baseUrlHeader = req.headers.get('x-base-url') || undefined;
+
+    const ai = await getAIProvider({
+      apiKey: body.apiKey || apiKeyHeader,
+      provider: body.provider || providerHeader,
+      model: body.model || modelHeader,
+      baseUrl: body.baseUrl || baseUrlHeader,
+    });
+
     // Shuffle chunks to ensure variety across quizzes
     const shuffledChunks = [...chunks].sort(() => 0.5 - Math.random());
 
@@ -79,18 +120,6 @@ export async function POST(req: Request) {
       )
       .join('\n\n---\n\n');
 
-    // 2. Call AI Provider
-    const headerApiKey = req.headers.get('x-api-key') || undefined;
-    const headerProvider = req.headers.get('x-provider') || undefined;
-    const headerModel = req.headers.get('x-model') || undefined;
-    const headerBaseUrl = req.headers.get('x-base-url') || undefined;
-
-    const ai = await getAIProvider({
-      apiKey: body.apiKey || headerApiKey,
-      provider: body.provider || headerProvider,
-      model: body.model || headerModel,
-      baseUrl: body.baseUrl || headerBaseUrl,
-    });
     const seed = Math.floor(Math.random() * 100000);
 
     const prompt = PROMPTS.GAMIFIED_QUIZ_GENERATION(sourceContext, {
