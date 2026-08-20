@@ -20,7 +20,17 @@ let sqlPromise: Promise<any> | null = null;
 
 async function getSqlJs() {
   if (!sqlPromise) {
-    sqlPromise = initSqlJs();
+    sqlPromise = initSqlJs({
+      locateFile: (file: string) => {
+        // In local development, try local path first
+        const localWasm = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
+        if (fs.existsSync(localWasm)) {
+          return localWasm;
+        }
+        // Fallback for Vercel / serverless cloud environments
+        return `https://sql.js.org/dist/${file}`;
+      },
+    });
   }
   return sqlPromise;
 }

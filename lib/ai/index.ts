@@ -14,11 +14,20 @@ let cachedProvider: BaseAIProvider | null = null;
 let lastProviderConfigKey = '';
 
 export async function getAIProvider(): Promise<BaseAIProvider> {
-  const dbProvider = await getSetting('ai_provider', process.env.AI_PROVIDER || process.env.OPENCODE_ZEN_PROVIDER || 'openrouter');
-  const dbModel = await getSetting('ai_model', process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'openai/gpt-oss-20b:free');
-  const dbApiKey = await getSetting('ai_api_key', process.env.AI_API_KEY || process.env.OPENCODE_ZEN_API_KEY || '');
-  const dbBaseUrl = await getSetting('ai_base_url', process.env.AI_BASE_URL || process.env.OPENCODE_ZEN_BASE_URL || 'https://openrouter.ai/api/v1');
+  let dbProvider = process.env.AI_PROVIDER || process.env.OPENCODE_ZEN_PROVIDER || 'openrouter';
+  let dbModel = process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'openai/gpt-oss-20b:free';
+  let dbApiKey = process.env.AI_API_KEY || process.env.OPENCODE_ZEN_API_KEY || '';
+  let dbBaseUrl = process.env.AI_BASE_URL || process.env.OPENCODE_ZEN_BASE_URL || 'https://openrouter.ai/api/v1';
   const dbFallbackModel = process.env.AI_MODEL_FALLBACK || 'dots-studio/dots-3-note-preview:free';
+
+  try {
+    dbProvider = await getSetting('ai_provider', dbProvider);
+    dbModel = await getSetting('ai_model', dbModel);
+    dbApiKey = await getSetting('ai_api_key', dbApiKey);
+    dbBaseUrl = await getSetting('ai_base_url', dbBaseUrl);
+  } catch (e) {
+    console.warn('Could not read settings from DB, using process.env:', e);
+  }
 
   const configKey = `${dbProvider}:${dbModel}:${dbApiKey ? 'key' : 'none'}:${dbBaseUrl}`;
 
