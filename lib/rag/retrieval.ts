@@ -71,6 +71,35 @@ export async function hybridRetrieve(
     allChunks = allChunks.filter((c) => c.document_id === options.documentFilterId);
   }
 
+  // Serverless Lambda Fallback: If chunks were not in memory for this lambda, re-index documents on disk
+  if (allChunks.length === 0) {
+    try {
+      const { getDocumentsByNotebook, insertChunks } = await import('../db/queries');
+      const { parseDocument } = await import('../parsers');
+      const { chunkDocument } = await import('./chunker');
+      const fs = await import('fs');
+
+      const docs = await getDocumentsByNotebook(notebookId);
+      for (const doc of docs) {
+        if (doc.file_path && fs.existsSync(doc.file_path)) {
+          const parsed = await parseDocument(doc.file_path, doc.filename);
+          const rawChunks = chunkDocument(parsed, doc.id, doc.notebook_id, doc.filename, {
+            targetChunkSize: 900,
+            overlapSize: 120,
+          });
+          const processedChunks = rawChunks.map((chunk) => ({
+            ...chunk,
+            embedding_json: JSON.stringify(computeTextVector(chunk.text + ' ' + chunk.section_heading)),
+          }));
+          await insertChunks(processedChunks);
+          allChunks.push(...processedChunks);
+        }
+      }
+    } catch (e) {
+      console.warn('Fallback serverless chunking error:', e);
+    }
+  }
+
   if (allChunks.length === 0) {
     return { query, chunks: [], citations: [], groundedContextText: '' };
   }
