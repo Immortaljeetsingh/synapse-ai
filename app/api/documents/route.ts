@@ -1,10 +1,15 @@
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import path from 'path';
 import { saveUploadedFile } from '@/lib/storage';
-import { createDocument, getDocumentsByNotebook } from '@/lib/db/queries';
-import { detectFileType } from '@/lib/parsers';
+import { createDocument, getDocumentsByNotebook, insertChunks, createNote } from '@/lib/db/queries';
+import { detectFileType, parseDocument } from '@/lib/parsers';
+import { chunkDocument } from '@/lib/rag/chunker';
+import { computeTextVector } from '@/lib/rag/embeddings';
+import { DocumentChunk } from '@/lib/types';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB limit
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.xls', '.csv', '.txt', '.md'];
@@ -70,25 +75,58 @@ export async function POST(req: Request) {
     // Calculate content hash for caching
     const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
 
-    // Save to secure uploads folder
+    // 1. Save to secure uploads folder
     const { filePath } = saveUploadedFile(rawFilename, buffer);
 
+    // 2. Immediate in-lambda parsing & vector chunking (atomic, sub-second)
+    const parsed = await parseDocument(filePath, rawFilename);
     const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    const rawChunks = chunkDocument(parsed, docId, notebookId, rawFilename, {
+      targetChunkSize: 900,
+      overlapSize: 120,
+    });
+
+    const processedChunks: DocumentChunk[] = rawChunks.map((chunk) => ({
+      ...chunk,
+      embedding_json: JSON.stringify(computeTextVector(chunk.text + ' ' + chunk.section_heading)),
+    }));
+
+    // 3. Create document record with status 'ready'
     const document = await createDocument({
       id: docId,
       notebook_id: notebookId,
       filename: rawFilename,
       file_type: fileType,
       file_size: file.size,
-      page_count: 1,
+      page_count: parsed.pageCount || 1,
       file_path: filePath,
       content_hash: contentHash,
-      processing_status: 'uploading',
+      processing_status: 'ready',
+      is_scanned: parsed.isScanned,
     });
 
-    return NextResponse.json({ success: true, document });
+    // 4. Save chunks in database
+    await insertChunks(processedChunks);
+
+    // 5. Create initial study overview note
+    const noteId = `note_init_${docId}_${Date.now()}`;
+    await createNote({
+      id: noteId,
+      notebook_id: notebookId,
+      title: `📌 Overview: ${rawFilename}`,
+      content: `### Document Overview: ${rawFilename}\n\n**Total Pages:** ${parsed.pageCount}\n**Total Chunks:** ${processedChunks.length}\n\n#### Key Sections Detected:\n${processedChunks.slice(0, 5).map((c) => `- **${c.section_heading || 'Section'}**: ${c.text.slice(0, 140)}...`).join('\n')}\n\n---\n*Ready for grounded Q&A, active-recall study flashcards, and practice quiz generation.*`,
+      format_type: 'cornell',
+    });
+
+    return NextResponse.json({
+      success: true,
+      document,
+      chunkCount: processedChunks.length,
+      pageCount: parsed.pageCount,
+    });
   } catch (err: any) {
-    console.error('Error uploading file:', err);
-    return NextResponse.json({ success: false, error: 'File upload failed. Please try again.' }, { status: 500 });
+    console.error('Error uploading and indexing file:', err);
+    return NextResponse.json({ success: false, error: 'File upload and indexing failed. Please try again.' }, { status: 500 });
   }
 }

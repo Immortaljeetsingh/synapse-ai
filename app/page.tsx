@@ -220,12 +220,6 @@ export default function ChatStudioWorkspace() {
         if (uploadData.success) {
           const newDoc = uploadData.document;
           setDocuments((prev) => [newDoc, ...prev]);
-
-          // Trigger lightweight background indexing
-          await fetch(`/api/documents/${newDoc.id}/process`, {
-            method: 'POST',
-            headers: getClientHeaders(),
-          });
           if (activeNotebookId) {
             loadNotebook(activeNotebookId);
           }
