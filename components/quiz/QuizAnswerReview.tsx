@@ -36,9 +36,20 @@ export const QuizAnswerReview: React.FC<QuizAnswerReviewProps> = ({
   const handleExplainDifferently = async (q: QuizQuestionItem) => {
     setExplainingQuestionId(q.id);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (typeof window !== 'undefined') {
+        const key = localStorage.getItem('synapse_api_key');
+        const provider = localStorage.getItem('synapse_provider');
+        const model = localStorage.getItem('synapse_model');
+        const baseUrl = localStorage.getItem('synapse_base_url');
+        if (key) headers['x-api-key'] = key;
+        if (provider) headers['x-provider'] = provider;
+        if (model) headers['x-model'] = model;
+        if (baseUrl) headers['x-base-url'] = baseUrl;
+      }
       const res = await fetch('/api/quiz/explain', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           question: q.question,
           correctAnswer: q.correct_answer,

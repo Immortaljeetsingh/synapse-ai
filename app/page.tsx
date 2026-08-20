@@ -92,6 +92,24 @@ export default function ChatStudioWorkspace() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Helper: Build AI credential headers from localStorage for every API call.
+  // Vercel lambdas are ephemeral — no persistent env vars or DB between cold starts.
+  // The client MUST send credentials with every request.
+  const getAIHeaders = useCallback((): Record<string, string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (typeof window !== 'undefined') {
+      const key = localStorage.getItem('synapse_api_key');
+      const provider = localStorage.getItem('synapse_provider');
+      const model = localStorage.getItem('synapse_model');
+      const baseUrl = localStorage.getItem('synapse_base_url');
+      if (key) headers['x-api-key'] = key;
+      if (provider) headers['x-provider'] = provider;
+      if (model) headers['x-model'] = model;
+      if (baseUrl) headers['x-base-url'] = baseUrl;
+    }
+    return headers;
+  }, []);
+
   const handleCreateNotebook = useCallback(async (title: string, description: string) => {
     try {
       const res = await fetch('/api/notebooks', {
@@ -249,7 +267,7 @@ export default function ChatStudioWorkspace() {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAIHeaders(),
         body: JSON.stringify({
           notebookId: activeNotebookId,
           message: msg,
@@ -259,7 +277,8 @@ export default function ChatStudioWorkspace() {
       const data = await res.json();
 
       if (data.success && data.message) {
-        setChatMessages((prev) => [...prev.filter((m) => m.id !== tempUserMsg.id), data.message]);
+        // Keep the user's message visible — only append the assistant response
+        setChatMessages((prev) => [...prev, data.message]);
 
         // If intent was flashcards, refresh and open Flashcards Companion tab
         if (data.specialPayload?.type === 'flashcards' && data.specialPayload.cards) {
@@ -385,7 +404,7 @@ export default function ChatStudioWorkspace() {
     try {
       const res = await fetch('/api/artifacts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAIHeaders(),
         body: JSON.stringify({
           notebookId: activeNotebookId,
           artifactType,
@@ -437,7 +456,7 @@ export default function ChatStudioWorkspace() {
     try {
       const res = await fetch('/api/quiz/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAIHeaders(),
         body: JSON.stringify({
           notebookId: activeNotebookId,
           documents: documents,
@@ -463,7 +482,7 @@ export default function ChatStudioWorkspace() {
     try {
       const res = await fetch('/api/notes/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAIHeaders(),
         body: JSON.stringify({ notebookId: activeNotebookId }),
       });
       const data = await res.json();
@@ -671,7 +690,7 @@ export default function ChatStudioWorkspace() {
             if (!activeNotebookId) return;
             const res = await fetch('/api/flashcards', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: getAIHeaders(),
               body: JSON.stringify({
                 notebookId: activeNotebookId,
                 card_type: 'conceptual',
