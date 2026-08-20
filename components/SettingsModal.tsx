@@ -32,19 +32,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const res = await fetch('/api/settings');
       const data = await res.json();
       if (data.success && data.settings) {
-        setProvider(data.settings.provider || 'openrouter');
-        setModel(data.settings.model || 'openai/gpt-oss-20b:free');
-        setBaseUrl(data.settings.baseUrl || 'https://openrouter.ai/api/v1');
+        setProvider(data.settings.provider || localStorage.getItem('synapse_provider') || 'openrouter');
+        setModel(data.settings.model || localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free');
+        setBaseUrl(data.settings.baseUrl || localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1');
+      } else {
+        const lp = localStorage.getItem('synapse_provider');
+        const lm = localStorage.getItem('synapse_model');
+        const lb = localStorage.getItem('synapse_base_url');
+        if (lp) setProvider(lp);
+        if (lm) setModel(lm);
+        if (lb) setBaseUrl(lb);
+      }
+      const localKey = localStorage.getItem('synapse_api_key');
+      if (localKey) {
+        setApiKey(localKey);
       }
     } catch (e) {
       console.error('Error loading settings:', e);
     }
   };
 
-  const checkHealth = async () => {
+  const checkHealth = async (customConfig?: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => {
     setIsCheckingHealth(true);
     try {
-      const res = await fetch('/api/ai/health');
+      const activeKey = customConfig?.apiKey ?? (apiKey && apiKey !== '********' ? apiKey : (localStorage.getItem('synapse_api_key') || ''));
+      const activeProvider = customConfig?.provider ?? provider;
+      const activeModel = customConfig?.model ?? model;
+      const activeBaseUrl = customConfig?.baseUrl ?? baseUrl;
+
+      const res = await fetch('/api/ai/health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: activeProvider,
+          model: activeModel,
+          apiKey: activeKey,
+          baseUrl: activeBaseUrl,
+        }),
+      });
       const data = await res.json();
       setHealthStatus(data);
     } catch (e: any) {
@@ -57,6 +82,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (apiKey && apiKey !== '********') {
+        localStorage.setItem('synapse_api_key', apiKey);
+      }
+      localStorage.setItem('synapse_provider', provider);
+      localStorage.setItem('synapse_model', model);
+      localStorage.setItem('synapse_base_url', baseUrl);
+
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -71,7 +103,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       if (data.success) {
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2500);
-        checkHealth();
+        checkHealth({ provider, model, apiKey, baseUrl });
       }
     } catch (e) {
       console.error('Error saving settings:', e);

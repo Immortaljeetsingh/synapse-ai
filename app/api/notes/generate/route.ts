@@ -12,7 +12,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'notebookId is required' }, { status: 400 });
     }
 
-    const ai = await getAIProvider();
+    const headerApiKey = req.headers.get('x-api-key') || undefined;
+    const headerProvider = req.headers.get('x-provider') || undefined;
+    const headerModel = req.headers.get('x-model') || undefined;
+    const headerBaseUrl = req.headers.get('x-base-url') || undefined;
+
+    const ai = await getAIProvider({
+      apiKey: body.apiKey || headerApiKey,
+      provider: body.provider || headerProvider,
+      model: body.model || headerModel,
+      baseUrl: body.baseUrl || headerBaseUrl,
+    });
 
     // If specific text is passed from viewer/drawer, generate targeted note
     if (text && action) {

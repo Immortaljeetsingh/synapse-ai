@@ -1,10 +1,22 @@
 export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getAIProvider } from '@/lib/ai';
 
-export async function GET() {
+async function performHealthCheck(req: NextRequest, bodyOverrides?: any) {
   try {
-    const provider = await getAIProvider();
+    const headerApiKey = req.headers.get('x-api-key') || undefined;
+    const headerProvider = req.headers.get('x-provider') || undefined;
+    const headerModel = req.headers.get('x-model') || undefined;
+    const headerBaseUrl = req.headers.get('x-base-url') || undefined;
+
+    const overrides = {
+      apiKey: bodyOverrides?.apiKey || headerApiKey,
+      provider: bodyOverrides?.provider || headerProvider,
+      model: bodyOverrides?.model || headerModel,
+      baseUrl: bodyOverrides?.baseUrl || headerBaseUrl,
+    };
+
+    const provider = await getAIProvider(overrides);
 
     // If it's the local fallback, report that
     if (provider.id === 'local') {
@@ -13,7 +25,7 @@ export async function GET() {
         connected: false,
         provider: 'local',
         model: 'Local Fallback (No API Key)',
-        message: 'No API key configured. Set AI_API_KEY in .env.local or Settings to enable real AI.',
+        message: 'No API key configured. Enter your API Key in Settings or set AI_API_KEY in Vercel.',
       });
     }
 
@@ -27,7 +39,7 @@ export async function GET() {
         status: 'connected',
         connected: true,
         provider: provider.id,
-        model: process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'unknown',
+        model: overrides.model || process.env.AI_MODEL || 'configured',
         fallbackModel: process.env.AI_MODEL_FALLBACK || null,
         testResponse: result.text?.slice(0, 50),
         usage: result.usage,
@@ -37,7 +49,7 @@ export async function GET() {
         status: 'error',
         connected: false,
         provider: provider.id,
-        model: process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'unknown',
+        model: overrides.model || process.env.AI_MODEL || 'configured',
         error: err.message,
       });
     }
@@ -48,4 +60,16 @@ export async function GET() {
       error: err.message,
     }, { status: 500 });
   }
+}
+
+export async function GET(req: NextRequest) {
+  return performHealthCheck(req);
+}
+
+export async function POST(req: NextRequest) {
+  let bodyOverrides = {};
+  try {
+    bodyOverrides = await req.json();
+  } catch {}
+  return performHealthCheck(req, bodyOverrides);
 }

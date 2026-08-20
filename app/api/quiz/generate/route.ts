@@ -80,7 +80,17 @@ export async function POST(req: Request) {
       .join('\n\n---\n\n');
 
     // 2. Call AI Provider
-    const ai = await getAIProvider();
+    const headerApiKey = req.headers.get('x-api-key') || undefined;
+    const headerProvider = req.headers.get('x-provider') || undefined;
+    const headerModel = req.headers.get('x-model') || undefined;
+    const headerBaseUrl = req.headers.get('x-base-url') || undefined;
+
+    const ai = await getAIProvider({
+      apiKey: body.apiKey || headerApiKey,
+      provider: body.provider || headerProvider,
+      model: body.model || headerModel,
+      baseUrl: body.baseUrl || headerBaseUrl,
+    });
     const seed = Math.floor(Math.random() * 100000);
 
     const prompt = PROMPTS.GAMIFIED_QUIZ_GENERATION(sourceContext, {
