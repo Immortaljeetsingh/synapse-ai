@@ -498,37 +498,53 @@ async function handleChat(req: Request) {
         .slice(0, 1600);
 
       const prompt = PROMPTS.RAG_CHAT(retrieval.groundedContextText, historyText, message);
-      const completion = await ai.generateText([
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ]);
-      replyText = completion.text;
 
-      // Grounding classification. Hedge phrases alone are unreliable — a
-      // long grounded answer may legitimately say "no information about X"
-      // for one sub-topic. Genuine refusals are SHORT, so require both the
-      // phrase AND a refusal-shaped (brief) reply.
-      const hedgePhrases = [
-        "couldn't find sufficient evidence",
-        "couldn't find this information",
-        'not available in the uploaded sources',
-        'does not contain any information',
-        "don't have enough information",
-        'no relevant information',
-      ];
-      const lowerReply = replyText.toLowerCase();
-      const looksLikeRefusal =
-        hedgePhrases.some((p) => lowerReply.includes(p)) && replyText.length < 700;
-
-      if (retrieval.chunks.length === 0 || looksLikeRefusal) {
+      // Confidence floor: below this the best chunk is noise, so skip the AI
+      // entirely — small models will happily answer off-topic questions from
+      // general knowledge instead of refusing. (On-topic ≈0.28, noise ≈0.06
+      // in calibration tests; 0.12 splits them with margin on both sides.)
+      const RETRIEVAL_CONFIDENCE_FLOOR = 0.12;
+      const topScore = retrieval.chunks[0]?.score ?? 0;
+      if (topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
+        replyText =
+          "**I couldn't find sufficient evidence for this in the uploaded documents.**\n\n" +
+          'Your question may be outside the scope of what you\'ve uploaded. Try rephrasing, or ask about a topic your documents actually cover.';
         groundingType = 'not_in_document';
         citations = [];
-      } else if (replyText.includes('AI Interpretation') || replyText.includes('Background Context')) {
-        groundingType = 'ai_interpretation';
-        citations = retrieval.citations.slice(0, 3);
+        retrievedChunksForResponse = [];
       } else {
-        groundingType = 'direct_source';
-        citations = retrieval.citations;
+        const completion = await ai.generateText([
+          { role: 'system', content: prompt.system },
+          { role: 'user', content: prompt.user },
+        ]);
+        replyText = completion.text;
+
+        // Grounding classification. Hedge phrases alone are unreliable — a
+        // long grounded answer may legitimately say "no information about X"
+        // for one sub-topic. Genuine refusals are SHORT, so require both the
+        // phrase AND a refusal-shaped (brief) reply.
+        const hedgePhrases = [
+          "couldn't find sufficient evidence",
+          "couldn't find this information",
+          'not available in the uploaded sources',
+          'does not contain any information',
+          "don't have enough information",
+          'no relevant information',
+        ];
+        const lowerReply = replyText.toLowerCase();
+        const looksLikeRefusal =
+          hedgePhrases.some((p) => lowerReply.includes(p)) && replyText.length < 700;
+
+        if (looksLikeRefusal && replyText.length < 700) {
+          groundingType = 'not_in_document';
+          citations = [];
+        } else if (replyText.includes('AI Interpretation') || replyText.includes('Background Context')) {
+          groundingType = 'ai_interpretation';
+          citations = retrieval.citations.slice(0, 3);
+        } else {
+          groundingType = 'direct_source';
+          citations = retrieval.citations;
+        }
       }
     }
   } catch (genErr: any) {
