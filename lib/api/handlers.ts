@@ -532,10 +532,21 @@ async function handleChat(req: Request) {
           'no relevant information',
         ];
         const lowerReply = replyText.toLowerCase();
+        // Models that ignore grounding instructions open with a disclaimer
+        // ("Based on the provided evidence, I must note that...") before
+        // fabricating from general knowledge — catch disclaimers in the
+        // opening line regardless of total length.
+        const opening = lowerReply.slice(0, 250);
         const looksLikeRefusal =
-          hedgePhrases.some((p) => lowerReply.includes(p)) && replyText.length < 700;
+          hedgePhrases.some((p) => opening.includes(p)) ||
+          (hedgePhrases.some((p) => lowerReply.includes(p)) && replyText.length < 700);
 
-        if (looksLikeRefusal && replyText.length < 700) {
+        if (looksLikeRefusal) {
+          // The model ignored grounding instructions and answered from
+          // general knowledge — discard the fabrication entirely.
+          replyText =
+            "**I couldn't find sufficient evidence for this in the uploaded documents.**\n\n" +
+            'The question appears to be outside the scope of what you\'ve uploaded. Try rephrasing, or ask about a topic your documents actually cover.';
           groundingType = 'not_in_document';
           citations = [];
         } else if (replyText.includes('AI Interpretation') || replyText.includes('Background Context')) {
