@@ -91,8 +91,9 @@ export class OpenCodeZenProvider extends BaseAIProvider {
       content: m.content,
     }));
 
-    // Output token limit up to 20,000 tokens for long-form deep responses
-    const maxTokens = options?.maxTokens ?? 20000;
+    // 8K cap — unbounded completions let slow free models run past the
+    // 60s serverless limit, which killed requests silently.
+    const maxTokens = options?.maxTokens ?? 8000;
 
     const requestBody: any = {
       model: this.model,

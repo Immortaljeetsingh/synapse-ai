@@ -502,8 +502,21 @@ export default function ChatStudioWorkspace() {
           setIsQuizActive(true);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error sending chat message:', e);
+      // Never fail silently — show an assistant-side error bubble so the
+      // user knows the message was received but the reply failed.
+      const errMsg = {
+        id: `msg_err_${Date.now()}`,
+        role: 'assistant',
+        content:
+          '**The reply failed to arrive.**\n\n' +
+          `\`${e?.message || 'Network or server error'}\`\n\n` +
+          'This usually means a timeout or rate limit on the AI provider. Your message was saved — try again in a moment.',
+        created_at: new Date().toISOString(),
+      };
+      setChatMessages((prev) => [...prev, errMsg as any]);
+      await mutateBundle(nbId, (b) => ({ messages: [...b.messages, errMsg as any] }));
     } finally {
       setIsChatLoading(false);
     }

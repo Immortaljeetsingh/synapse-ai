@@ -294,7 +294,13 @@ async function handleChat(req: Request) {
       citations = deepRetrieval.citations;
 
       const history = await getChatMessages(session.id);
-      const historyText = history.slice(-4, -1).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
+      // Truncate history — a full deep-research report carried verbatim in
+      // every later prompt bloated context until requests hit the 60s limit.
+      const historyText = history
+        .slice(-4, -1)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 400)}`)
+        .join('\n\n')
+        .slice(0, 1600);
       const prompt = PROMPTS.DEEP_RESEARCH_REPORT(deepRetrieval.groundedContextText, historyText, message);
       const completion = await ai.generateText([
         { role: 'system', content: prompt.system },
@@ -446,7 +452,13 @@ async function handleChat(req: Request) {
       citations = retrieval.citations;
 
       const history = await getChatMessages(session.id);
-      const historyText = history.slice(-4, -1).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n');
+      // Truncate history — long prior answers (e.g. full research reports)
+      // bloated every later prompt until requests hit the 60s limit.
+      const historyText = history
+        .slice(-4, -1)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 400)}`)
+        .join('\n\n')
+        .slice(0, 1600);
 
       const prompt = PROMPTS.RAG_CHAT(retrieval.groundedContextText, historyText, message);
       const completion = await ai.generateText([
