@@ -501,9 +501,8 @@ async function handleChat(req: Request) {
 
       // Confidence floor: below this the best chunk is noise, so skip the AI
       // entirely — small models will happily answer off-topic questions from
-      // general knowledge instead of refusing. (On-topic ≈0.28, noise ≈0.06
-      // in calibration tests; 0.12 splits them with margin on both sides.)
-      const RETRIEVAL_CONFIDENCE_FLOOR = 0.12;
+      // general knowledge instead of refusing.
+      const RETRIEVAL_CONFIDENCE_FLOOR = 0.09;
       const topScore = retrieval.chunks[0]?.score ?? 0;
       if (topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
         replyText =
@@ -532,14 +531,12 @@ async function handleChat(req: Request) {
           'no relevant information',
         ];
         const lowerReply = replyText.toLowerCase();
-        // Models that ignore grounding instructions open with a disclaimer
-        // ("Based on the provided evidence, I must note that...") before
-        // fabricating from general knowledge — catch disclaimers in the
-        // opening line regardless of total length.
-        const opening = lowerReply.slice(0, 250);
-        const looksLikeRefusal =
-          hedgePhrases.some((p) => opening.includes(p)) ||
-          (hedgePhrases.some((p) => lowerReply.includes(p)) && replyText.length < 700);
+        // Fabrication signature: hedge language present AND no real source
+        // citation anywhere. Grounded answers cite files per the prompt
+        // ([name.ext, p. X]); general-knowledge rambles don't.
+        const hasCitationMarker = /\[[^\]\n]{2,80}\.(docx|pdf|txt|md|csv|xlsx|xls)[^\]\n]*\]/i.test(replyText);
+        const hasHedge = hedgePhrases.some((p) => lowerReply.includes(p));
+        const looksLikeRefusal = hasHedge && !hasCitationMarker;
 
         if (looksLikeRefusal) {
           // The model ignored grounding instructions and answered from
