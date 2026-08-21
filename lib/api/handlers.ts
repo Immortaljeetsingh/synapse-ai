@@ -64,6 +64,10 @@ const CREDENTIAL_HEADERS = (req: Request, body: any = {}) => ({
   baseUrl: body.baseUrl || req.headers.get('x-base-url') || undefined,
 });
 
+// Content words excluded from vocabulary-overlap checks (grounding
+// classification and query-to-evidence routing).
+const STOP_WORDS = new Set(['the','and','for','that','this','with','from','have','has','its','are','was','were','been','their','they','which','will','would','could','should','there','these','those','then','than','when','what','where','while','about','into','over','also','only','very','more','most','such','each','both','between','because','after','before','under','above','other','some','all','any','not','but','can','may','must','does','did','doing','being']);
+
 async function readBody(req: Request): Promise<any> {
   try {
     return await req.json();
@@ -386,11 +390,10 @@ async function runChat(
       // Same fabrication guard as chat: a "research report" sharing almost
       // no vocabulary with the retrieved evidence is general-knowledge
       // hallucination, not document analysis.
-      const stopWords = new Set(['the','and','for','that','this','with','from','have','has','its','are','was','were','been','their','they','which','will','would','could','should','there','these','those','then','than','when','what','where','while','about','into','over','also','only','very','more','most','such','each','both','between','because','after','before','under','above','other','some','all','any','not','but','can','may','must','does','did','doing','being']);
       const evidenceVocab = new Set(
         ((deepRetrieval.chunks.slice(0, 5).map((c) => c.text).join(' ') || '').toLowerCase().match(/[a-z]{4,}/g)) || []
       );
-      const reportWords = (replyText.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w) => !stopWords.has(w));
+      const reportWords = (replyText.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w) => !STOP_WORDS.has(w));
       const reportOverlap =
         reportWords.length > 0
           ? reportWords.filter((w) => evidenceVocab.has(w)).length / reportWords.length
@@ -584,7 +587,16 @@ async function runChat(
       // coming from the user's documents (ai_interpretation).
       const RETRIEVAL_CONFIDENCE_FLOOR = 0.06;
       const topScore = retrieval.chunks[0]?.score ?? 0;
-      if (topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
+      // Route by shared vocabulary: if the question's content words don't
+      // appear in the top chunks (6-char prefix match handles plurals like
+      // frequency/frequencies), the documents can't answer it — use GK mode.
+      const qWords = (message.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w: string) => !STOP_WORDS.has(w));
+      const evidenceText = retrieval.chunks.slice(0, 3).map((c: any) => c.text).join(' ').toLowerCase();
+      const evidenceMatches = evidenceText.match(/[a-z]{4,}/g) || [];
+      const evidencePrefixes = new Set(evidenceMatches.map((w: string) => w.slice(0, 6)));
+      const matched = qWords.filter((w: string) => evidencePrefixes.has(w.slice(0, 6))).length;
+      const qOverlap = qWords.length > 0 ? matched / qWords.length : 1;
+      if (qWords.length === 0 || qOverlap < 0.34 || topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
         retrievedChunksForResponse = [];
         citations = [];
         const gk = await ai.generateText(
@@ -636,7 +648,6 @@ async function runChat(
         // Vocabulary-overlap check: a genuinely grounded answer reuses the
         // document's own words; general-knowledge fabrications share almost
         // no content vocabulary with the retrieved chunks.
-        const STOP_WORDS = new Set(['the','and','for','that','this','with','from','have','has','its','are','was','were','been','their','they','which','will','would','could','should','there','these','those','then','than','when','what','where','while','about','into','over','also','only','very','more','most','such','each','both','between','because','after','before','under','above','other','some','all','any','not','but','can','may','must','does','did','doing','being']);
         const evidenceWords = new Set(
           ((retrieval.chunks.slice(0, 3).map((c) => c.text).join(' ') || '').toLowerCase().match(/[a-z]{4,}/g)) || []
         );

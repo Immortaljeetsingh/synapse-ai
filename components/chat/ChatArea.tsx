@@ -11,6 +11,7 @@ import {
   Layers,
   ShieldCheck,
   Search,
+  Sparkles,
 } from 'lucide-react';
 import { ChatMessageRecord, DocumentRecord, CitationReference } from '@/lib/types';
 import { InlineFlashcards } from './InlineFlashcards';
@@ -145,6 +146,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-neutral-200/80 dark:bg-neutral-850 border border-neutral-300 dark:border-neutral-700 text-[10px] font-mono text-neutral-800 dark:text-neutral-300 mb-1">
                     <ShieldCheck className="w-3 h-3 text-neutral-500 dark:text-neutral-400" />
                     <span>Multi-Stage Evidence Verified ({payload.evidenceCount || citations.length} Passages Analyzed)</span>
+                  </div>
+                )}
+
+                {/* Grounding Mode Badges */}
+                {!isUser && msg.grounding_type === 'ai_interpretation' && (
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[10px] font-medium">
+                    <Sparkles className="w-3 h-3" />
+                    <span>General AI knowledge — not from your documents</span>
+                  </div>
+                )}
+                {!isUser && msg.grounding_type === 'not_in_document' && (
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-neutral-500/10 text-neutral-600 dark:text-neutral-400 border border-neutral-500/30 text-[10px] font-medium">
+                    <Search className="w-3 h-3" />
+                    <span>Not found in your documents</span>
                   </div>
                 )}
 
