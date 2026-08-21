@@ -76,8 +76,8 @@ export const QuizResultsDashboard: React.FC<QuizResultsDashboardProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center p-6 overflow-y-auto select-none animate-in fade-in zoom-in duration-200">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-2xl w-full shadow-2xl space-y-6">
+    <div className="fixed inset-0 z-50 bg-slate-950 flex justify-center p-6 overflow-y-auto select-none animate-in fade-in zoom-in duration-200">
+      <div className="my-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-2xl w-full shadow-2xl space-y-6">
         {/* Top Trophy Banner */}
         <div className="text-center space-y-3">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 flex items-center justify-center mx-auto shadow-xl shadow-amber-500/20">

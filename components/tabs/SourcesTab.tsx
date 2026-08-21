@@ -156,7 +156,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
               return (
                 <div
                   key={doc.id}
-                  className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 flex items-center justify-between gap-4 hover:border-neutral-700 transition-colors shadow-3d"
+                  className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 hover:border-neutral-700 transition-colors shadow-3d"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     <div className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 shrink-0">

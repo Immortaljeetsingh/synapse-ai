@@ -68,8 +68,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
         </div>
 
         {/* Tab Switcher & Search */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-1.5 p-1 bg-neutral-950 rounded-xl border border-neutral-800">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-1.5 p-1 bg-neutral-950 rounded-xl border border-neutral-800 overflow-x-auto max-w-full no-scrollbar">
             <button
               onClick={() => setActiveTab('notes')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
@@ -107,14 +107,14 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
             </button>
           </div>
 
-          <div className="relative">
+          <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[180px]">
             <Search className="w-3.5 h-3.5 text-neutral-600 absolute left-2.5 top-2" />
             <input
               type="text"
               placeholder="Search library..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 pr-3 py-1 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-200 focus:outline-none focus:border-neutral-600"
+              className="w-full pl-8 pr-3 py-1 bg-neutral-950 border border-neutral-800 rounded-lg text-xs text-neutral-200 focus:outline-none focus:border-neutral-600"
             />
           </div>
         </div>

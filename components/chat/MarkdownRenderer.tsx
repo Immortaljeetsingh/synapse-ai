@@ -263,7 +263,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     i++;
   }
 
-  return <div className="space-y-1.5">{elements}</div>;
+  return <div className="space-y-1.5 [overflow-wrap:anywhere]">{elements}</div>;
 };
 
 /**
@@ -303,7 +303,7 @@ const CodeBlock: React.FC<{ language: string; code: string }> = ({ language, cod
       </div>
 
       {/* Code Body */}
-      <pre className="p-4 overflow-x-auto text-xs font-mono text-neutral-200 leading-relaxed no-scrollbar selection:bg-neutral-800">
+      <pre className="p-4 overflow-x-auto text-xs font-mono text-neutral-200 leading-relaxed selection:bg-neutral-800">
         <code>{code}</code>
       </pre>
     </div>

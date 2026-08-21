@@ -133,6 +133,9 @@ html.light ::-webkit-scrollbar-thumb {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* iOS-safe full-height (dvh with vh fallback) */
+.app-h { height: 100vh; height: 100dvh; }
+
 /* 3D Utilities */
 .perspective-1000 { perspective: 1000px; }
 .transform-style-preserve-3d { transform-style: preserve-3d; }

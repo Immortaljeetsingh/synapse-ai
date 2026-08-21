@@ -35,13 +35,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onLaunchQuizMode,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const isFirstRenderRef = useRef(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    if (isFirstRenderRef.current || isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
     }
+    isFirstRenderRef.current = false;
   }, [messages, isLoading]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  };
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -68,7 +79,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-6 lg:px-12 py-6 space-y-6 select-none">
+    <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-3 sm:px-6 lg:px-12 py-6 space-y-6 select-none">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Welcome Banner if empty */}
         {messages.length === 0 && (
@@ -139,7 +150,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                 {/* Rich Markdown & Interactive Citations */}
                 {isUser ? (
-                  <div className="whitespace-pre-wrap select-text">{msg.content}</div>
+                  <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] select-text">{msg.content}</div>
                 ) : (
                   <MarkdownRenderer
                     content={msg.content}

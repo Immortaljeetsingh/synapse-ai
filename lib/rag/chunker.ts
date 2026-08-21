@@ -31,15 +31,28 @@ export function chunkDocument(
       .filter((p) => p.length > 0);
 
     let currentSectionHeading = page.headings.length > 0 ? page.headings[0] : '';
+    // Heading at the time the current chunk STARTED — a heading appearing
+    // mid-chunk applies to the NEXT chunk, not retroactively to this one.
+    let chunkStartHeading = currentSectionHeading;
+    let pendingHeadingChange = false;
     let currentChunkText = '';
     let paragraphPos = 0;
 
     for (let i = 0; i < paragraphs.length; i++) {
       const para = paragraphs[i];
 
-      // Check if this paragraph is a section heading
-      if (para.length < 90 && !para.endsWith('.') && (para.startsWith('#') || para.toUpperCase() === para)) {
+      // Check if this paragraph is a section heading.
+      // Must contain a real word (>=3 letters) — pure numbers ("2024"),
+      // acronyms-only ("USA"), and roman numerals are NOT headings.
+      const isHeading =
+        para.length < 90 &&
+        !para.endsWith('.') &&
+        (para.startsWith('#') || para.toUpperCase() === para) &&
+        /[a-zA-Z]{3,}/.test(para.replace(/^#+\s*/, '')) &&
+        !/^(?:[0-9]+|[IVXLC]+|[A-Z]{2,5})$/.test(para.trim());
+      if (isHeading && currentSectionHeading !== para.replace(/^#+\s*/, '')) {
         currentSectionHeading = para.replace(/^#+\s*/, '');
+        pendingHeadingChange = true;
       }
 
       // Check if adding this paragraph exceeds target size
@@ -52,13 +65,13 @@ export function chunkDocument(
           notebook_id: notebookId,
           chunk_index: chunkIndex++,
           page_number: pageNum,
-          section_heading: currentSectionHeading,
+          section_heading: chunkStartHeading,
           paragraph_position: paragraphPos,
           text: currentChunkText.trim(),
           metadata_json: JSON.stringify({
             filename,
             page_number: pageNum,
-            section_heading: currentSectionHeading,
+            section_heading: chunkStartHeading,
             char_count: currentChunkText.length,
           }),
         });
@@ -68,8 +81,16 @@ export function chunkDocument(
         const overlapWords = words.slice(Math.max(0, words.length - 25)).join(' ');
         currentChunkText = overlapWords + '\n\n' + para;
         paragraphPos = i;
+        if (pendingHeadingChange) {
+          chunkStartHeading = currentSectionHeading;
+          pendingHeadingChange = false;
+        }
       } else {
         currentChunkText = (currentChunkText ? currentChunkText + '\n\n' : '') + para;
+        if (pendingHeadingChange) {
+          chunkStartHeading = currentSectionHeading;
+          pendingHeadingChange = false;
+        }
       }
     }
 
@@ -82,13 +103,13 @@ export function chunkDocument(
         notebook_id: notebookId,
         chunk_index: chunkIndex++,
         page_number: pageNum,
-        section_heading: currentSectionHeading,
+        section_heading: chunkStartHeading,
         paragraph_position: paragraphPos,
         text: currentChunkText.trim(),
         metadata_json: JSON.stringify({
           filename,
           page_number: pageNum,
-          section_heading: currentSectionHeading,
+          section_heading: chunkStartHeading,
           char_count: currentChunkText.length,
         }),
       });

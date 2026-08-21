@@ -28,6 +28,11 @@ export function detectFileType(filename: string): FileType {
 }
 
 export async function parseDocument(filePath: string, filename: string): Promise<ParsedDocumentResult> {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === '.doc') {
+    throw new Error('Legacy .doc files are not supported — please save as .docx or PDF and re-upload.');
+  }
+
   const fileType = detectFileType(filename);
 
   switch (fileType) {

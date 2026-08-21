@@ -145,7 +145,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
       </div>
 
       {/* Page Content Display */}
-      <div className="flex-1 overflow-y-auto p-6 bg-neutral-950 text-neutral-300 text-xs leading-relaxed font-sans whitespace-pre-wrap select-text">
+      <div className="flex-1 overflow-y-auto p-6 bg-neutral-950 text-neutral-300 text-xs leading-relaxed font-sans whitespace-pre-wrap break-words [overflow-wrap:anywhere] select-text">
         {renderHighlightedText(currentText)}
       </div>
 

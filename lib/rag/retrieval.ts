@@ -101,6 +101,14 @@ export async function hybridRetrieve(
       const docs = await getDocumentsByNotebook(notebookId);
       for (const doc of docs) {
         if (doc.file_path && fs.existsSync(doc.file_path)) {
+          // Deterministic chunk ids (chk_${docId}_${i}) collide with rows
+          // already inserted by a previous partial fallback run — skip docs
+          // that already have chunks instead of aborting on a PK error.
+          const existing = await import('../db/queries').then((q) => q.getChunksByDocument(doc.id));
+          if (existing.length > 0) {
+            allChunks.push(...existing);
+            continue;
+          }
           const parsed = await parseDocument(doc.file_path, doc.filename);
           const rawChunks = chunkDocument(parsed, doc.id, doc.notebook_id, doc.filename, {
             targetChunkSize: 900,
@@ -190,7 +198,9 @@ export async function hybridRetrieve(
 
     const totalScore = 0.45 * normalizedBM25 + 0.45 * vectorScore + headingBoost;
 
-    if (totalScore >= minScore || scoredChunks.length < 2) {
+    // Strict threshold — force-admitting low-score chunks used to fake
+    // "grounded" citations for off-topic questions.
+    if (totalScore >= minScore) {
       scoredChunks.push({
         chunkId: chunk.id,
         documentId: chunk.document_id,

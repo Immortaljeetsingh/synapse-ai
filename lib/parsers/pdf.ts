@@ -82,7 +82,14 @@ export async function parsePdf(filePath: string): Promise<ParsedDocumentResult> 
         metadata: data.info || {},
       };
     } catch (err2) {
-      // Tier 3: Robust stream/binary fallback (for malformed XRef or corrupt PDF streams)
+      // Tier 3: Robust stream/binary fallback (for malformed XRef or corrupt PDF streams).
+      // NEVER return binary mojibake as content — fail loudly with an honest message.
+      const msg1 = String((err1 as any)?.message || '');
+      const msg2 = String((err2 as any)?.message || '');
+      if (/password/i.test(msg1) || /password/i.test(msg2)) {
+        throw new Error('This PDF is password-protected. Remove the password and re-upload.');
+      }
+
       const rawString = dataBuffer.toString('latin1');
       const textMatches: string[] = [];
       const streamRegex = /\(([^)\\]{3,})\)/g;
@@ -92,11 +99,22 @@ export async function parsePdf(filePath: string): Promise<ParsedDocumentResult> 
       }
       const fallbackText = textMatches.join(' ') || rawString.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
 
+      // Printable-ratio sanity check: compressed/encoded streams produce
+      // garbage that must not be indexed and cited as real content.
+      const sample = fallbackText.replace(/\s+/g, '').slice(0, 2000);
+      const printable = (sample.match(/[\x20-\x7E\u00A0-\u024F]/g) || []).length;
+      const cidCount = (fallbackText.match(/cid:/g) || []).length;
+      if (sample.length === 0 || printable / sample.length < 0.6 || cidCount > 10) {
+        throw new Error(
+          'Could not extract readable text from this PDF — it may be scanned, corrupted, or use unsupported encoding.'
+        );
+      }
+
       return {
         pageCount: 1,
         pages: [{ pageNumber: 1, text: fallbackText, headings: [] }],
         fullText: fallbackText,
-        isScanned: false,
+        isScanned: true,
         metadata: {},
       };
     }

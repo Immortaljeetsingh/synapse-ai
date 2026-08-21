@@ -776,7 +776,7 @@ export default function ChatStudioWorkspace() {
   const activeNotebook = notebooks.find((n) => n.id === activeNotebookId) || null;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 antialiased font-sans select-none">
+    <div className="flex app-h w-screen overflow-hidden bg-neutral-950 text-neutral-100 antialiased font-sans select-none">
       {/* 1. Left Collapsible Sidebar */}
       <Sidebar
         notebooks={notebooks}

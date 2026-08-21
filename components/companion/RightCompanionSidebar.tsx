@@ -127,7 +127,7 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
 
   return (
     <div
-      className={`fixed inset-0 z-40 md:relative md:z-30 h-screen border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 flex flex-col transition-all duration-300 select-none shrink-0 ${
+      className={`fixed inset-0 z-40 md:relative md:z-30 h-screen app-h border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 flex flex-col transition-all duration-300 select-none shrink-0 md:max-w-[calc(100vw-18rem)] ${
         isExpanded ? 'w-full md:w-[680px] lg:w-[760px]' : 'w-full md:w-[440px] lg:w-[500px]'
       }`}
     >

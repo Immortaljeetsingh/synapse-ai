@@ -229,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* 2. Desktop Persistent / Collapsed Sidebar */}
       {isCollapsed ? (
-        <div className="hidden md:flex w-14 h-screen bg-white dark:bg-neutral-950 border-r border-neutral-200 dark:border-neutral-900 flex-col items-center justify-between py-4 select-none shrink-0">
+        <div className="hidden md:flex w-14 app-h bg-white dark:bg-neutral-950 border-r border-neutral-200 dark:border-neutral-900 flex-col items-center justify-between py-4 select-none shrink-0">
           <div className="flex flex-col items-center gap-4">
             <button
               onClick={onToggleCollapse}
@@ -267,7 +267,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       ) : (
-        <div className="hidden md:flex w-64 lg:w-72 h-screen bg-white dark:bg-neutral-950 border-r border-neutral-200 dark:border-neutral-900 shrink-0">
+        <div className="hidden md:flex w-64 lg:w-72 app-h bg-white dark:bg-neutral-950 border-r border-neutral-200 dark:border-neutral-900 shrink-0">
           {renderSidebarContent(false)}
         </div>
       )}
