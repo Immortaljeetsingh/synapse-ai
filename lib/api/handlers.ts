@@ -562,7 +562,7 @@ async function runChat(
       });
       specialPayload = { type: 'note_created', note };
     } else {
-      const retrieval = await hybridRetrieve(notebookId, message, {
+      let retrieval = await hybridRetrieve(notebookId, message, {
         topK: 6,
         documentFilterId,
         minScore: 0.02,
@@ -586,7 +586,7 @@ async function runChat(
       // refusing, answer from GENERAL KNOWLEDGE — clearly labeled as not
       // coming from the user's documents (ai_interpretation).
       const RETRIEVAL_CONFIDENCE_FLOOR = 0.06;
-      const topScore = retrieval.chunks[0]?.score ?? 0;
+      let topScore = retrieval.chunks[0]?.score ?? 0;
       // Route by shared vocabulary: if the question's content words don't
       // appear in the top chunks (6-char prefix match handles plurals like
       // frequency/frequencies), the documents can't answer it — use GK mode.
@@ -596,7 +596,28 @@ async function runChat(
       const evidencePrefixes = new Set(evidenceMatches.map((w: string) => w.slice(0, 6)));
       const matched = qWords.filter((w: string) => evidencePrefixes.has(w.slice(0, 6))).length;
       const qOverlap = qWords.length > 0 ? matched / qWords.length : 1;
-      if (qWords.length === 0 || qOverlap < 0.34 || topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
+
+      // META-QUESTIONS about the document itself ("tell me about this
+      // document", "summarize the file") share no content vocabulary with it
+      // by nature — they must NEVER route to general-knowledge mode. Re-run
+      // retrieval with scores ignored so the model gets the doc's own text.
+      const mentionsDocument =
+        /\b(document|file|files|upload|uploaded|attachment|attached|pdf|docx|doc|notebook|material|materials|source|sources)\b/i.test(
+          message
+        );
+      if (mentionsDocument && retrieval.chunks.length > 0 && (qOverlap < 0.34 || topScore < RETRIEVAL_CONFIDENCE_FLOOR)) {
+        retrieval = await hybridRetrieve(notebookId, message, {
+          topK: 10,
+          documentFilterId,
+          minScore: 0,
+          externalChunks,
+        });
+        retrievedChunksForResponse = retrieval.chunks;
+        citations = retrieval.citations;
+        topScore = retrieval.chunks[0]?.score ?? 1;
+      }
+
+      if (!mentionsDocument && (qWords.length === 0 || qOverlap < 0.34 || topScore < RETRIEVAL_CONFIDENCE_FLOOR)) {
         retrievedChunksForResponse = [];
         citations = [];
         const gk = await ai.generateText(
