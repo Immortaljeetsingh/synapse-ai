@@ -195,7 +195,7 @@ export async function hybridRetrieve(
         chunkId: chunk.id,
         documentId: chunk.document_id,
         documentName: chunk.filename || 'Document',
-        pageNumber: chunk.page_number,
+        pageNumber: chunk.page_number ?? 1,
         sectionHeading: chunk.section_heading || '',
         text: chunk.text,
         score: totalScore,
@@ -221,7 +221,7 @@ export async function hybridRetrieve(
   const groundedContextText = topChunks
     .map(
       (c, idx) =>
-        `[EVIDENCE ${idx + 1}] (Document: "${c.documentName}", Page: ${c.pageNumber}${
+        `[EVIDENCE ${idx + 1}] (Document: "${c.documentName}", Page: ${c.pageNumber ?? 1}${
           c.sectionHeading ? `, Section: "${c.sectionHeading}"` : ''
         }${c.subtopic ? `, Subtopic: "${c.subtopic}"` : ''})\n${c.text}`
     )
