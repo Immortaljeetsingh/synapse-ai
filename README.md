@@ -50,7 +50,6 @@ Edit `.env.local` with your preferred AI provider credentials:
 # Primary Provider ('openrouter', 'openai', 'groq', 'deepseek', 'together', or 'ollama')
 AI_PROVIDER=openrouter
 AI_MODEL=openai/gpt-oss-20b:free
-AI_MODEL_FALLBACK=dots-studio/dots-3-note-preview:free
 AI_BASE_URL=https://openrouter.ai/api/v1
 AI_API_KEY=your_api_key_here
 ```
@@ -94,6 +93,8 @@ npm run start
 - **Honest Offline Mode**: With no API key configured, the app clearly says AI features are unavailable instead of fabricating document-grounded content.
 
 > **Deployment note**: SQLite data and uploaded files live on the server filesystem (`./data` locally, `/tmp` on Vercel). On serverless platforms storage is ephemeral per warm instance — for durable multi-user persistence, point `DB_PATH`/`UPLOAD_DIR` at a mounted volume or migrate to a hosted database.
+
+> **Large-file deployment note**: Vercel serverless functions reject request bodies over ~4.5MB (HTTP 413), so the browser extracts text client-side before upload — TXT/MD/CSV are read directly with `file.text()`, and PDFs over 3MB are parsed per-page in-browser via `pdfjs-dist` — then POSTed as JSON to `/api/documents/text`. This bypasses the lambda body limit for PDF/TXT/MD/CSV. DOCX/XLSX have no browser parser and remain capped at the multipart limit (~3.5MB); larger office files must be converted to PDF or split.
 
 ---
 

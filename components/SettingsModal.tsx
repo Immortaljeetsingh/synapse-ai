@@ -61,9 +61,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       let b = 'https://openrouter.ai/api/v1';
 
       if (data.success && data.settings) {
-        p = data.settings.provider || localStorage.getItem('synapse_provider') || 'openrouter';
-        m = data.settings.model || localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free';
-        b = data.settings.baseUrl || localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1';
+        // localStorage is the source of truth on the client; server only fills gaps
+        p = localStorage.getItem('synapse_provider') || data.settings.provider || 'openrouter';
+        m = localStorage.getItem('synapse_model') || data.settings.model || 'openai/gpt-oss-20b:free';
+        b = localStorage.getItem('synapse_base_url') || data.settings.baseUrl || 'https://openrouter.ai/api/v1';
       } else {
         p = localStorage.getItem('synapse_provider') || 'openrouter';
         m = localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free';
@@ -93,8 +94,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   useEffect(() => {
     if (isOpen) {
-      loadSettings();
-      checkHealth();
+      (async () => {
+        await loadSettings();
+      })().then(() => checkHealth());
     }
   }, [isOpen, loadSettings, checkHealth]);
 

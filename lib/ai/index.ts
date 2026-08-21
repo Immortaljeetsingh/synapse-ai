@@ -20,7 +20,6 @@ export async function getAIProvider(overrides?: {
   let dbModel = overrides?.model || process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'openai/gpt-oss-20b:free';
   let dbApiKey = overrides?.apiKey || process.env.AI_API_KEY || process.env.OPENCODE_ZEN_API_KEY || '';
   let dbBaseUrl = overrides?.baseUrl || process.env.AI_BASE_URL || process.env.OPENCODE_ZEN_BASE_URL || 'https://openrouter.ai/api/v1';
-  const dbFallbackModel = process.env.AI_MODEL_FALLBACK || 'dots-studio/dots-3-note-preview:free';
 
   if (!overrides?.apiKey) {
     try {
@@ -44,7 +43,6 @@ export async function getAIProvider(overrides?: {
         apiKey: dbApiKey,
         baseUrl: dbBaseUrl || 'https://openrouter.ai/api/v1',
         model: dbModel,
-        fallbackModel: dbFallbackModel,
       });
 
     case 'opencode_zen':

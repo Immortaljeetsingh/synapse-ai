@@ -208,33 +208,102 @@ export default function ChatStudioWorkspace() {
   };
 
   // Upload Handlers
+  // Vercel lambdas reject request bodies >4.5MB (HTTP 413), so large files are
+  // extracted to text IN THE BROWSER and sent as JSON instead of raw binaries.
+  const PDF_MULTIPART_LIMIT = 3 * 1024 * 1024;
+  const OFFICE_MULTIPART_LIMIT = 3.5 * 1024 * 1024;
+
+  const uploadMultipart = async (file: File) => {
+    const formData = new FormData();
+    formData.append('notebookId', activeNotebookId!);
+    formData.append('file', file);
+    const res = await fetch('/api/documents', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+    return data.document as DocumentRecord;
+  };
+
+  const uploadViaTextEndpoint = async (filename: string, pages: { pageNumber: number; text: string }[]) => {
+    const res = await fetch('/api/documents/text', {
+      method: 'POST',
+      headers: getAIHeaders(),
+      body: JSON.stringify({ notebookId: activeNotebookId!, filename, fileType: filename.split('.').pop(), pages }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+    return data.document as DocumentRecord;
+  };
+
+  // Mirrors lib/parsers/pdf.ts pager logic: newline when y moves >5, space otherwise.
+  const extractPdfPagesInBrowser = async (file: File) => {
+    const pdfjs = await import('pdfjs-dist');
+    // ponytail: worker served from public/, kept in sync by the postinstall
+    // copy script — re-copy manually if pdfjs-dist is ever bumped without it.
+    pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+    const pages: { pageNumber: number; text: string }[] = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const textContent = await page.getTextContent();
+      let lastY: number | null = null;
+      let text = '';
+      for (const item of textContent.items as any[]) {
+        if (lastY == null || Math.abs(item.transform[5] - lastY) > 5) {
+          text += '\n' + item.str;
+        } else {
+          text += (text.endsWith(' ') ? '' : ' ') + item.str;
+        }
+        lastY = item.transform[5];
+      }
+      pages.push({ pageNumber: n, text: text.trim() });
+    }
+    return pages;
+  };
+
   const handleUploadFiles = async (files: FileList) => {
     if (!activeNotebookId) return;
     setIsUploading(true);
 
+    let failures = 0;
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const formData = new FormData();
-        formData.append('notebookId', activeNotebookId);
-        formData.append('file', file);
-
-        const uploadRes = await fetch('/api/documents', {
-          method: 'POST',
-          body: formData,
-        });
-        const uploadData = await uploadRes.json();
-
-        if (uploadData.success) {
-          const newDoc = uploadData.document;
-          setDocuments((prev) => [newDoc, ...prev]);
-          if (activeNotebookId) {
-            loadNotebook(activeNotebookId);
+        const name = file.name.toLowerCase();
+        try {
+          let newDoc: DocumentRecord;
+          if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv')) {
+            // Text formats never need the binary — read in-browser and send JSON.
+            const text = await file.text();
+            newDoc = await uploadViaTextEndpoint(file.name, [{ pageNumber: 1, text }]);
+          } else if (name.endsWith('.pdf') && file.size > PDF_MULTIPART_LIMIT) {
+            newDoc = await uploadViaTextEndpoint(file.name, await extractPdfPagesInBrowser(file));
+          } else if (
+            (name.endsWith('.docx') || name.endsWith('.xlsx') || name.endsWith('.xls')) &&
+            file.size > OFFICE_MULTIPART_LIMIT
+          ) {
+            alert(
+              `${file.name} is ${(file.size / (1024 * 1024)).toFixed(1)}MB. Files over ~4MB must be under the platform limit for DOCX/XLSX — convert to PDF or split the file.`
+            );
+            failures++;
+            continue;
+          } else {
+            newDoc = await uploadMultipart(file);
           }
+
+          setDocuments((prev) => [newDoc, ...prev]);
+          loadNotebook(activeNotebookId);
+        } catch (uploadErr: any) {
+          failures++;
+          console.error(`Upload failed for ${file.name}:`, uploadErr);
+          alert(`Upload failed: ${uploadErr?.message || String(uploadErr)}`);
         }
       }
     } finally {
       setIsUploading(false);
+      if (failures > 0) {
+        alert(`${failures} of ${files.length} file(s) failed to upload.`);
+      }
     }
   };
 

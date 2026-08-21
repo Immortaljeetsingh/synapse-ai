@@ -43,7 +43,7 @@ import {
   setSetting,
 } from '@/lib/db/queries';
 import { getCachedArtifact, setCachedArtifact, getAIProvider, PROMPTS } from '@/lib/ai';
-import { detectFileType, parseDocument } from '@/lib/parsers';
+import { detectFileType, parseDocument, ParsedDocumentResult } from '@/lib/parsers';
 import { chunkDocument } from '@/lib/rag/chunker';
 import { computeTextVector } from '@/lib/rag/embeddings';
 import { hybridRetrieve, multiStageDeepRetrieve } from '@/lib/rag/retrieval';
@@ -129,6 +129,9 @@ function detectIntent(message: string): {
 // ==================== DOCUMENT UPLOAD HELPERS ====================
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB limit
+// ponytail: ~3M chars keeps the JSON body + embeddings work inside the
+// serverless function; raise alongside a hosted DB if ever needed.
+const MAX_TEXT_CHARS = 3_000_000;
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.xls', '.csv', '.txt', '.md'];
 
 function validateMagicBytes(buffer: Buffer, ext: string): boolean {
@@ -152,18 +155,16 @@ function validateMagicBytes(buffer: Buffer, ext: string): boolean {
   }
 }
 
-async function indexDocumentFile(
+// Single indexing pipeline shared by multipart upload and /documents/text.
+async function indexParsedDocument(
   notebookId: string,
   rawFilename: string,
-  buffer: Buffer,
-  filePath: string,
+  parsed: ParsedDocumentResult,
   fileType: string,
-  fileSize: number
+  fileSize: number,
+  filePath: string,
+  contentHash: string
 ) {
-  const crypto = await import('crypto');
-  const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
-
-  const parsed = await parseDocument(filePath, rawFilename);
   const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
   const rawChunks = chunkDocument(parsed, docId, notebookId, rawFilename, {
@@ -211,6 +212,22 @@ async function indexDocumentFile(
   }));
 
   return { document, lightweightChunks, chunkCount: processedChunks.length, pageCount: parsed.pageCount };
+}
+
+async function indexDocumentFile(
+  notebookId: string,
+  rawFilename: string,
+  buffer: Buffer,
+  filePath: string,
+  fileType: string,
+  fileSize: number
+) {
+  const crypto = await import('crypto');
+  const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+  const parsed = await parseDocument(filePath, rawFilename);
+
+  return indexParsedDocument(notebookId, rawFilename, parsed, fileType, fileSize, filePath, contentHash);
 }
 
 // ==================== CHAT ====================
@@ -986,6 +1003,63 @@ export async function handleApi(req: Request): Promise<Response> {
           pageCount: result.pageCount,
         });
       }
+    }
+
+    // ---------- /api/documents/text (client-extracted text, bypasses lambda body limit) ----------
+    if (resource === 'documents' && second === 'text' && method === 'POST') {
+      const body = await readBody(req);
+      const { notebookId, filename, pages } = body;
+
+      if (!notebookId || !filename || !Array.isArray(pages) || pages.length === 0) {
+        return json({ success: false, error: 'notebookId, filename, and a non-empty pages array are required' }, 400);
+      }
+
+      const notebook = await getNotebookById(notebookId);
+      if (!notebook) return json({ success: false, error: 'Notebook not found' }, 404);
+
+      const cleanPages = pages.map((p: any, i: number) => ({
+        pageNumber: Number(p?.pageNumber) || i + 1,
+        text: String(p?.text ?? ''),
+        headings: Array.isArray(p?.headings) ? p.headings.map(String) : [],
+      }));
+      const fullText = cleanPages.map((p: any) => p.text).join('\n\n');
+
+      if (fullText.length > MAX_TEXT_CHARS) {
+        return json(
+          { success: false, error: `Extracted text is ${(fullText.length / 1_000_000).toFixed(1)}M characters; the limit is ~3M. Split the document and upload in parts.` },
+          413
+        );
+      }
+
+      const path = await import('path');
+      const rawFilename = path.basename(String(filename));
+      const crypto = await import('crypto');
+      const contentHash = crypto.createHash('sha256').update(fullText).digest('hex');
+
+      const parsed: ParsedDocumentResult = {
+        pageCount: cleanPages.length,
+        pages: cleanPages,
+        fullText,
+        isScanned: fullText.trim().length < 50 * cleanPages.length,
+        metadata: { source: 'client-extracted' },
+      };
+
+      const result = await indexParsedDocument(
+        notebookId,
+        rawFilename,
+        parsed,
+        detectFileType(rawFilename),
+        Buffer.byteLength(fullText),
+        '',
+        contentHash
+      );
+
+      return json({
+        success: true,
+        document: { ...result.document, chunks: result.lightweightChunks },
+        chunkCount: result.chunkCount,
+        pageCount: result.pageCount,
+      });
     }
 
     if (resource === 'documents' && second && third === 'process' && method === 'POST') {
