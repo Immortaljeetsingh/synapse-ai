@@ -319,51 +319,71 @@ function renderInlineFormatting(
 ): React.ReactNode {
   if (!text) return '';
 
-  // Regex to match citation patterns: [Doc: file.docx, p. 12] or [file.docx, p. 12] or [file.pdf, p. 12]
-  const citationRegex = /\[(?:Doc:\s*|Source:\s*)?([^,\]]+\.(?:pdf|docx|txt|md|csv|xlsx|pptx|doc)),\s*p\.?\s*(\d+)\]/gi;
+  // Bracket scanner: candidates like [report.pdf, p. 13], [Doc: cats.txt, Page: 3],
+  // [Document A, p. 13; Document B, p. 18]. Non-citation brackets ([link](url), [note])
+  // are left untouched for parseMarkdownSpans.
+  const bracketRegex = /\[([^\][\n]+)\]/g;
 
   const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
+  let pushedUpTo = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = citationRegex.exec(text)) !== null) {
-    const preText = text.substring(lastIndex, match.index);
+  while ((match = bracketRegex.exec(text)) !== null) {
+    const citations = parseCitationBracket(match[1]);
+    if (citations.length === 0) continue;
+
+    const preText = text.substring(pushedUpTo, match.index);
     if (preText) {
       parts.push(...parseMarkdownSpans(preText));
     }
 
-    const docName = match[1].trim();
-    const pageNum = parseInt(match[2], 10) || 1;
+    citations.forEach((citation, cIdx) => {
+      const { name: docName, page: pageNum } = citation;
+      parts.push(
+        <button
+          key={`cit-${match!.index}-${cIdx}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (onOpenCitation) {
+              onOpenCitation(docName, pageNum, '');
+            }
+          }}
+          className="inline-flex items-center gap-1 mx-1 px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-900 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-700 font-mono text-[10px] transition-all cursor-pointer shadow-3d-sm select-none align-middle"
+          title={`Open ${docName} on Page ${pageNum}`}
+        >
+          <FileText className="w-2.5 h-2.5 text-neutral-500 dark:text-neutral-400" />
+          <span className="truncate max-w-[130px] font-semibold">{docName}</span>
+          <span className="text-neutral-500 dark:text-neutral-400 font-mono">p.{pageNum}</span>
+          <ExternalLink className="w-2.5 h-2.5 text-neutral-400" />
+        </button>
+      );
+    });
 
-    parts.push(
-      <button
-        key={`cit-${match.index}`}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (onOpenCitation) {
-            onOpenCitation(docName, pageNum, '');
-          }
-        }}
-        className="inline-flex items-center gap-1 mx-1 px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-900 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-700 font-mono text-[10px] transition-all cursor-pointer shadow-3d-sm select-none align-middle"
-        title={`Open ${docName} on Page ${pageNum}`}
-      >
-        <FileText className="w-2.5 h-2.5 text-neutral-500 dark:text-neutral-400" />
-        <span className="truncate max-w-[130px] font-semibold">{docName}</span>
-        <span className="text-neutral-500 dark:text-neutral-400 font-mono">p.{pageNum}</span>
-        <ExternalLink className="w-2.5 h-2.5 text-neutral-400" />
-      </button>
-    );
-
-    lastIndex = citationRegex.lastIndex;
+    pushedUpTo = bracketRegex.lastIndex;
   }
 
-  const remainingText = text.substring(lastIndex);
+  const remainingText = text.substring(pushedUpTo);
   if (remainingText) {
     parts.push(...parseMarkdownSpans(remainingText));
   }
 
   return <>{parts}</>;
+}
+
+/**
+ * Parses the inside of a [...] bracket into one citation per source.
+ * Accepts [name.ext, p. N], [name, page N], [Doc: name.ext, Page: N] and
+ * multi-source brackets ("A.pdf, p. 1; B.pdf, p. 2"). Extension is optional;
+ * names are passed through as-is (consumers fall back gracefully).
+ * Returns [] when the bracket is not a citation.
+ */
+function parseCitationBracket(inner: string): { name: string; page: number }[] {
+  const segmentRegex = /^(?:(?:doc|source):\s*)?(.{1,80}?)\s*[,;]\s*(?:p\.?\s*|page[:\s]*)(\d{1,4})$/i;
+  return inner.split(';').flatMap((segment) => {
+    const m = segment.trim().match(segmentRegex);
+    return m ? [{ name: m[1].trim(), page: parseInt(m[2], 10) || 1 }] : [];
+  });
 }
 
 /**

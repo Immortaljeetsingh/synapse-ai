@@ -70,7 +70,7 @@ export async function hybridRetrieve(
   } = {}
 ): Promise<RetrievalResult> {
   const topK = options.topK || 12;
-  const minScore = options.minScore || 0.02;
+  const minScore = options.minScore ?? 0.02;
 
   let allChunks: any[] = [];
   if (options.externalChunks && options.externalChunks.length > 0) {

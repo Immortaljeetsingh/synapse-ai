@@ -580,13 +580,11 @@ async function runChat(
         .join('\n\n')
         .slice(0, 1600);
 
-      const prompt = PROMPTS.RAG_CHAT(retrieval.groundedContextText, historyText, message);
-
       // Confidence floor: below this the best chunk is noise. Instead of
       // refusing, answer from GENERAL KNOWLEDGE — clearly labeled as not
       // coming from the user's documents (ai_interpretation).
       const RETRIEVAL_CONFIDENCE_FLOOR = 0.06;
-      let topScore = retrieval.chunks[0]?.score ?? 0;
+      const topScore = retrieval.chunks[0]?.score ?? 0;
       // Route by shared vocabulary: if the question's content words don't
       // appear in the top chunks (6-char prefix match handles plurals like
       // frequency/frequencies), the documents can't answer it — use GK mode.
@@ -614,8 +612,12 @@ async function runChat(
         });
         retrievedChunksForResponse = retrieval.chunks;
         citations = retrieval.citations;
-        topScore = retrieval.chunks[0]?.score ?? 1;
       }
+
+      // Built AFTER any meta-question re-retrieval so the prompt carries the
+      // final groundedContextText — otherwise the model answers from stale
+      // context while citing the new chunks.
+      const prompt = PROMPTS.RAG_CHAT(retrieval.groundedContextText, historyText, message);
 
       if (!mentionsDocument && (qWords.length === 0 || qOverlap < 0.34 || topScore < RETRIEVAL_CONFIDENCE_FLOOR)) {
         retrievedChunksForResponse = [];
@@ -630,7 +632,9 @@ async function runChat(
                 '- Be accurate, thorough and well-structured (Markdown headings, "-" bullets, tables where useful).\n' +
                 '- Do NOT invent document citations like [file.pdf, p. X] — nothing here comes from their files.\n' +
                 '- Start with a one-line note: "> Answered from general AI knowledge — not from your uploaded documents."\n' +
-                '- If the question might relate to their documents, offer at the end to dig into the files if they rephrase.',
+                '- If the question might relate to their documents, offer at the end to dig into the files if they rephrase.\n' +
+                '- Use the conversation context if the message refers to something earlier.' +
+                (historyText ? `\n\nRECENT CONVERSATION CONTEXT (may be relevant):\n${historyText}` : ''),
             },
             { role: 'user', content: message },
           ],
@@ -669,8 +673,10 @@ async function runChat(
         // Vocabulary-overlap check: a genuinely grounded answer reuses the
         // document's own words; general-knowledge fabrications share almost
         // no content vocabulary with the retrieved chunks.
+        // Sample from the same chunks carried in groundedContextText
+        // (topK 6; up to 10 after meta re-retrieval), not just the top 3.
         const evidenceWords = new Set(
-          ((retrieval.chunks.slice(0, 3).map((c) => c.text).join(' ') || '').toLowerCase().match(/[a-z]{4,}/g)) || []
+          ((retrieval.chunks.slice(0, 6).map((c) => c.text).join(' ') || '').toLowerCase().match(/[a-z]{4,}/g)) || []
         );
         const replyContentWords = (lowerReply.match(/[a-z]{4,}/g) || []).filter((w) => !STOP_WORDS.has(w));
         const vocabOverlap =
@@ -679,7 +685,7 @@ async function runChat(
             : 0;
 
         const looksLikeRefusal =
-          (hasHedge && !hasCitationMarker) ||
+          (hasHedge && replyText.length < 1500 && !hasCitationMarker) ||
           vocabOverlap < 0.1;
 
         if (looksLikeRefusal) {
@@ -1590,6 +1596,7 @@ export async function handleApi(req: Request): Promise<Response> {
         if (!notebookId || !question || !correct_answer) {
           return json({ success: false, error: 'Missing required fields' }, 400);
         }
+        await ensureNotebookRow(notebookId);
         const { insertQuestions } = await import('@/lib/db/queries');
         const q = {
           id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1636,6 +1643,7 @@ export async function handleApi(req: Request): Promise<Response> {
         if (!quizId || !notebookId) {
           return json({ success: false, error: 'quizId and notebookId are required' }, 400);
         }
+        await ensureNotebookRow(notebookId);
         // Coerce client numerics — strings/NaN from the UI used to poison
         // the numeric columns on insert.
         const num = (v: any) => {

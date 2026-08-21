@@ -69,6 +69,33 @@ interface NotebookBundle {
 const NB_KEY = 'synapse_notebooks';
 const ACTIVE_KEY = 'synapse_active_nb';
 const nbBundleKey = (id: string) => `synapse_nb_${id}`;
+
+// ponytail: 3.5MB body cap — Vercel lambdas reject bodies over ~4.5MB; keep
+// first N chunks by document order until under the cap.
+const MAX_CHUNK_BODY_BYTES = 3.5 * 1024 * 1024;
+function buildSlimChunks(docs: LocalDocument[]): LightweightChunk[] {
+  const out: LightweightChunk[] = [];
+  let total = 2;
+  for (const d of docs) {
+    for (const c of d.chunks || []) {
+      const slim: LightweightChunk = {
+        id: c.id,
+        document_id: c.document_id,
+        notebook_id: c.notebook_id,
+        chunk_index: c.chunk_index,
+        page_number: c.page_number,
+        section_heading: c.section_heading,
+        text: c.text,
+        filename: d.filename,
+      };
+      const size = JSON.stringify(slim).length + 1;
+      if (total + size > MAX_CHUNK_BODY_BYTES) return out;
+      out.push(slim);
+      total += size;
+    }
+  }
+  return out;
+}
 const emptyBundle = (): NotebookBundle => ({
   documents: [],
   messages: [],
@@ -443,19 +470,25 @@ export default function ChatStudioWorkspace() {
       created_at: new Date().toISOString(),
     };
     setChatMessages((prev) => [...prev, tempUserMsg]);
-    await mutateBundle(nbId, (b) => ({ messages: [...b.messages, tempUserMsg] }));
+    // Guarded so an idb failure can't brick the composer below.
+    try {
+      await mutateBundle(nbId, (b) => ({ messages: [...b.messages, tempUserMsg] }));
+    } catch (persistErr) {
+      console.error('Failed to persist user message locally:', persistErr);
+    }
 
+    let liveMsgId = '';
     try {
       // Streaming endpoint — the assistant bubble fills in live as tokens
       // arrive, then the done event carries the final persisted message.
-      const liveMsgId = `msg_live_${Date.now()}`;
+      liveMsgId = `msg_live_${Date.now()}`;
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: getAIHeaders(),
         body: JSON.stringify({
           notebookId: nbId,
           message: msg,
-          documents: documents,
+          chunks: buildSlimChunks(documents),
           stream: true,
         }),
       });
@@ -575,6 +608,8 @@ export default function ChatStudioWorkspace() {
       }
     } catch (e: any) {
       console.error('Error sending chat message:', e);
+      // Remove any mid-stream ghost bubble before surfacing the failure.
+      if (liveMsgId) setChatMessages((prev) => prev.filter((m) => m.id !== liveMsgId));
       // Never fail silently — show an assistant-side error bubble so the
       // user knows the message was received but the reply failed.
       const errMsg = {
@@ -663,6 +698,11 @@ export default function ChatStudioWorkspace() {
 
   const handleDeleteNote = async (id: string) => {
     setNotes((prev) => prev.filter((n) => n.id !== id));
+    // Cancel any pending autosave for the deleted note.
+    if (noteSaveTimers.current[id]) {
+      clearTimeout(noteSaveTimers.current[id]);
+      delete noteSaveTimers.current[id];
+    }
     if (activeNotebookId) {
       await mutateBundle(activeNotebookId, (b) => ({
         notes: b.notes.filter((n) => n.id !== id),
@@ -782,10 +822,9 @@ export default function ChatStudioWorkspace() {
   const handleStartQuizConfig = async (config: QuizConfig) => {
     if (!activeNotebookId) return;
     // Scoped chunks make generation work on ANY server instance (stateless).
-    const scopedDocs = config.documentId
-      ? documents.filter((d) => d.id === config.documentId)
-      : documents;
-    let chunks = scopedDocs.flatMap((d) => d.chunks || []);
+    let chunks = buildSlimChunks(
+      config.documentId ? documents.filter((d) => d.id === config.documentId) : documents
+    );
     if (config.topic) {
       const t = config.topic.toLowerCase();
       chunks = chunks.filter(
@@ -800,7 +839,6 @@ export default function ChatStudioWorkspace() {
         headers: getAIHeaders(),
         body: JSON.stringify({
           notebookId: activeNotebookId,
-          documents: documents,
           chunks,
           ...config,
         }),
@@ -1105,23 +1143,30 @@ export default function ChatStudioWorkspace() {
           onBackToResults={() => setIsReviewingAnswers(false)}
           onCreateFlashcard={async (q) => {
             if (!activeNotebookId) return;
-            const res = await fetch('/api/flashcards', {
-              method: 'POST',
-              headers: getAIHeaders(),
-              body: JSON.stringify({
-                notebookId: activeNotebookId,
-                card_type: 'conceptual',
-                question: q.question,
-                answer: `${q.correct_answer}\n\nRationale: ${q.explanation}`,
-                topic: q.topic || 'General',
-                difficulty: q.difficulty || 'medium',
-                source_document: q.source_document,
-                page_number: q.page_number,
-              }),
-            });
-            const data = await res.json();
-            if (data.success && data.flashcard) {
-              setFlashcards((prev) => [data.flashcard, ...prev]);
+            try {
+              const res = await fetch('/api/flashcards', {
+                method: 'POST',
+                headers: getAIHeaders(),
+                body: JSON.stringify({
+                  notebookId: activeNotebookId,
+                  card_type: 'conceptual',
+                  question: q.question,
+                  answer: `${q.correct_answer}\n\nRationale: ${q.explanation}`,
+                  topic: q.topic || 'General',
+                  difficulty: q.difficulty || 'medium',
+                  source_document: q.source_document,
+                  page_number: q.page_number,
+                }),
+              });
+              const data = await res.json();
+              if (data.success && data.flashcard) {
+                setFlashcards((prev) => [data.flashcard, ...prev]);
+                await mutateBundle(activeNotebookId, (b) => ({
+                  flashcards: [data.flashcard, ...b.flashcards],
+                }));
+              }
+            } catch (err) {
+              console.error('Error creating flashcard:', err);
             }
           }}
           onOpenCitationInViewer={handleOpenCitation}
