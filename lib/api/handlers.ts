@@ -1396,6 +1396,11 @@ export async function handleApi(req: Request): Promise<Response> {
     }
 
     // ---------- /api/chat ----------
+    if (resource === 'chat' && second === 'stream' && method === 'POST') {
+      // handleChat inspects body.stream and returns an SSE Response.
+      return await handleChat(req);
+    }
+
     if (resource === 'chat' && !second) {
       if (method === 'GET') {
         const notebookId = sp.get('notebookId');
