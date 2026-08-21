@@ -127,6 +127,7 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
             if (e.target.files && e.target.files.length > 0) {
               onUploadFiles(e.target.files);
             }
+            e.target.value = '';
           }}
         />
 

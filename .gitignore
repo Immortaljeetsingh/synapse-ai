@@ -19,6 +19,7 @@
 .env.production.local
 
 # Local SQLite databases and persistent runtime storage
+*.db
 /data/*.db
 /data/*.db-journal
 /data/*.db-wal

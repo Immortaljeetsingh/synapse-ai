@@ -943,6 +943,7 @@ export default function ChatStudioWorkspace() {
 
         {/* Main Conversation Stream */}
         <ChatArea
+          key={activeNotebookId}
           messages={chatMessages}
           activeDocuments={documents}
           isLoading={isChatLoading}

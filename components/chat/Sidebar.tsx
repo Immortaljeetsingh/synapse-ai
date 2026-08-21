@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Plus,
   MessageSquare,
@@ -8,6 +8,7 @@ import {
   BookOpen,
   Settings,
   Trash2,
+  Check,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -47,6 +48,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleDeleteClick = (id: string) => {
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    if (pendingDeleteId === id) {
+      setPendingDeleteId(null);
+      onDeleteNotebook(id);
+      return;
+    }
+    // ponytail: single pending id + one timer; per-row timers only if lists get huge
+    setPendingDeleteId(id);
+    deleteTimerRef.current = setTimeout(() => setPendingDeleteId(null), 3000);
+  };
 
   // Group conversations by date
   const now = new Date();
@@ -173,12 +188,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onDeleteNotebook(n.id);
+                          handleDeleteClick(n.id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-rose-500 text-neutral-400 dark:text-neutral-600 transition-opacity"
-                        title="Delete chat"
+                        className={`opacity-0 group-hover:opacity-100 p-1 transition-opacity ${
+                          pendingDeleteId === n.id
+                            ? 'text-rose-500'
+                            : 'text-neutral-400 dark:text-neutral-600 hover:text-rose-500'
+                        }`}
+                        title={pendingDeleteId === n.id ? 'Click again to confirm delete' : 'Delete chat'}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {pendingDeleteId === n.id ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
                   );

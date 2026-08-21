@@ -7,6 +7,8 @@ A high-performance, document-grounded research partner and active-recall learnin
 ## 🌟 Core Features
 
 - **Document-Grounded RAG Intelligence**: Upload PDFs, Word documents, Excel spreadsheets, CSVs, or text files. Query them with zero-hallucination factual grounding, multi-stage retrieval, and precise document citations (page, paragraph, and excerpt).
+- **Live Token Streaming**: Chat replies stream token-by-token over Server-Sent Events via `POST /api/chat/stream` (`delta` events as tokens arrive, a final `done` event carrying the persisted message, `error` on failure). Deep research reports and research notes stream live too; quiz and flashcard generation remain request/response JSON since they return structured payloads.
+- **General-Knowledge Mode**: Questions unrelated to your uploaded documents are answered from the model's general AI knowledge instead of being refused — and are clearly badged **"Answered from general AI knowledge — not from your uploaded documents"** (`grounding_type: ai_interpretation`). Questions that reference your documents never route there; see [Grounding & Fabrication Guards](#-grounding--fabrication-guards) below.
 - **Gamified Quiz & Exam Arena**: Generate customizable assessments (5, 10, 15, 20 questions) with instant answer review, streak multipliers, time-tracking, and document citation jump-links.
 - **Active Recall Flashcard Engine**: Smart flashcard generation with front/back flip animations, topic categorization, difficulty rating, and spaced repetition tracking.
 - **Structured Note Generation**: Auto-generate Cornell notes, key executive summaries, error analyses, and actionable bullet takeaways directly from uploaded sources.
@@ -84,6 +86,23 @@ npm run start
 
 ---
 
+## 🛡️ Grounding & Fabrication Guards
+
+Every chat answer is classified as document-grounded (`direct_source`) or general-knowledge (`ai_interpretation`):
+
+- **Routing**: If the question's content vocabulary doesn't overlap the retrieved chunks, or retrieval confidence falls below a floor (~0.06), the question is answered from general knowledge — unless the message references the documents ("this file", "the PDF", …), in which case it is always answered from retrieved context.
+- **Fabrication guards on grounded replies**: hedge-phrase detection (e.g. "couldn't find sufficient evidence") combined with the absence of any `[file.pdf, p. X]` citation marker, plus a vocabulary-overlap check against the retrieved evidence (< 10% overlap), relabels an ungrounded answer as `ai_interpretation` with citations stripped — the user still gets the answer, honestly labeled instead of passed off as document-grounded.
+
+---
+
+## ⚠️ Limits & Constraints
+
+- **Function timeout**: The API route sets `maxDuration = 300` (5 minutes) for long-form research generation. Vercel clamps this to your plan's maximum (60s on Hobby by default), so single replies are bounded by model speed × the effective time limit.
+- **Token budgets per reply**: chat 12K, structured JSON generation (quizzes, flashcards, notes, artifacts) 16K, deep research 32K.
+- **Context caps**: retrieved evidence and conversation history are truncated before prompting to stay inside the function time limit; very large notebooks are sampled rather than fed whole.
+
+---
+
 ## 🔒 Security & Privacy
 
 - **Bring-Your-Own-Key**: API keys are entered in Settings and stored in your browser (localStorage) plus the local app database; they are sent with each AI request so serverless deployments never need persistent secrets. Anyone using the app in a shared/browser environment should treat keys accordingly.
@@ -96,7 +115,16 @@ npm run start
 
 > **Large-file deployment note**: Vercel serverless functions reject request bodies over ~4.5MB (HTTP 413), so the browser extracts text client-side before upload — TXT/MD/CSV are read directly with `file.text()`, and PDFs over ~3MB are parsed per-page in-browser via `pdfjs-dist` — then POSTed as JSON to `/api/documents/text`. This bypasses the lambda body limit for PDF/TXT/MD/CSV. DOCX/XLSX have no browser parser and remain capped at the multipart limit (~3.5MB); larger office files must be converted to PDF or split.
 
-> **Memory model**: The AI model itself is stateless — no server-side conversation memory. Each chat request injects the last ~3 exchanges (each message truncated, total capped) as context into the prompt, so the model always answers grounded in recent conversation plus retrieved document chunks.
+> **Memory model**: The AI model itself is stateless — no server-side conversation memory. Each chat request injects the last ~3 exchanges (each message capped at 400 characters, 1,600 characters total) as context into the prompt, so the model always answers grounded in recent conversation plus retrieved document chunks.
+
+---
+
+## 🗂️ Static Assets
+
+- `public/favicon.svg` — app icon (referenced in `app/layout.tsx` metadata)
+- `public/robots.txt` — crawler directives
+- `public/pdf.worker.min.mjs` — client-side PDF extraction worker (`pdfjs-dist`)
+- `public/logo*.png`, `public/synapse-logo.png` — branding assets
 
 ---
 

@@ -133,30 +133,51 @@ export class OpenCodeZenProvider extends BaseAIProvider {
       const streamBody = streamRes.body!;
 
       let full = '';
+      const onDelta = options.onDelta;
       const reader = streamBody.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      const parseLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) return;
+        const payload = trimmed.slice(5).trim();
+        if (payload === '[DONE]') return;
+        let json: any;
+        try {
+          json = JSON.parse(payload);
+        } catch {
+          return;
+        }
+        if (json.error) {
+          const msg =
+            typeof json.error === 'string'
+              ? json.error
+              : json.error?.message || JSON.stringify(json.error);
+          throw new Error(`OpenCode Zen stream error: ${msg}`);
+        }
+        const choice = json.choices?.[0];
+        const delta =
+          choice?.delta?.content ||
+          choice?.delta?.reasoning ||
+          choice?.delta?.reasoning_content ||
+          choice?.text ||
+          '';
+        if (delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      };
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const payload = trimmed.slice(5).trim();
-          if (payload === '[DONE]') continue;
-          try {
-            const json = JSON.parse(payload);
-            const delta = json.choices?.[0]?.delta?.content || '';
-            if (delta) {
-              full += delta;
-              options.onDelta(delta);
-            }
-          } catch {}
-        }
+        for (const line of lines) parseLine(line);
       }
+      // Flush residual buffer + decoder tail so the last SSE event is never lost.
+      parseLine(buffer);
+      for (const line of decoder.decode().split('\n')) parseLine(line);
       if (!full.trim()) {
         throw new Error('OpenCode Zen returned an empty stream.');
       }
@@ -175,6 +196,7 @@ export class OpenCodeZenProvider extends BaseAIProvider {
             Authorization: `Bearer ${this.apiKey}`,
           },
           body: JSON.stringify(requestBody),
+          signal: options?.signal,
         });
 
         if (!res.ok) {

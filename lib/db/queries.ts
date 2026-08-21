@@ -112,10 +112,13 @@ export async function deleteNotebook(id: string): Promise<boolean> {
   await runQuery(`DELETE FROM chat_sessions WHERE notebook_id = ?`, [id]);
   await runQuery(`DELETE FROM notes WHERE notebook_id = ?`, [id]);
   await runQuery(`DELETE FROM flashcards WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM quiz_answers WHERE attempt_id IN (SELECT id FROM quiz_attempts WHERE notebook_id = ?)`, [id]);
   await runQuery(`DELETE FROM quiz_attempts WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE notebook_id = ?)`, [id]);
   await runQuery(`DELETE FROM quizzes WHERE notebook_id = ?`, [id]);
   await runQuery(`DELETE FROM questions WHERE notebook_id = ?`, [id]);
   await runQuery(`DELETE FROM generated_artifacts WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM quiz_topic_performance WHERE notebook_id = ?`, [id]);
   await runQuery(`DELETE FROM notebooks WHERE id = ?`, [id]);
   return true;
 }
@@ -209,6 +212,8 @@ export async function deleteDocument(id: string): Promise<boolean> {
   // Explicit cascade — never rely on PRAGMA foreign_keys being enforced.
   await runQuery(`DELETE FROM document_chunks WHERE document_id = ?`, [id]);
   await runQuery(`DELETE FROM questions WHERE document_id = ?`, [id]);
+  await runQuery(`DELETE FROM flashcards WHERE document_id = ?`, [id]);
+  await runQuery(`DELETE FROM generated_artifacts WHERE document_id = ?`, [id]);
   await runQuery(`DELETE FROM documents WHERE id = ?`, [id]);
   return true;
 }
@@ -577,7 +582,7 @@ export async function recordQuizAttempt(attempt: {
         ans.selected_answer,
         ans.is_correct ? 1 : 0,
         ans.response_time_ms || 0,
-        ans.points_earned || 0,
+        ans.points_awarded ?? ans.points_earned ?? 0,
         ans.topic || 'General',
       ]
     );

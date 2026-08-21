@@ -1,5 +1,4 @@
 export const DB_SCHEMA = `
-PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS notebooks (
@@ -221,4 +220,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- Unique indexes (idempotent). On legacy DBs with duplicate rows these throw,
+-- so index.ts also runs them individually in try/catch after the schema.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_topic_perf_unique ON quiz_topic_performance(notebook_id, topic);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_unique ON generated_artifacts(notebook_id, artifact_type, COALESCE(document_id, ''));
 `;
