@@ -502,7 +502,7 @@ async function handleChat(req: Request) {
       // Confidence floor: below this the best chunk is noise, so skip the AI
       // entirely — small models will happily answer off-topic questions from
       // general knowledge instead of refusing.
-      const RETRIEVAL_CONFIDENCE_FLOOR = 0.09;
+      const RETRIEVAL_CONFIDENCE_FLOOR = 0.06;
       const topScore = retrieval.chunks[0]?.score ?? 0;
       if (topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
         replyText =
@@ -536,7 +536,12 @@ async function handleChat(req: Request) {
         // ([name.ext, p. X]); general-knowledge rambles don't.
         const hasCitationMarker = /\[[^\]\n]{2,80}\.(docx|pdf|txt|md|csv|xlsx|xls)[^\]\n]*\]/i.test(replyText);
         const hasHedge = hedgePhrases.some((p) => lowerReply.includes(p));
-        const looksLikeRefusal = hasHedge && !hasCitationMarker;
+        // Weak retrieval + an answer that cites nothing = fabrication from
+        // general knowledge. Confident fabrication (no hedge) is caught here
+        // too, because grounded answers are instructed to always cite.
+        const looksLikeRefusal =
+          (hasHedge && !hasCitationMarker) ||
+          (!hasCitationMarker && topScore < 0.15);
 
         if (looksLikeRefusal) {
           // The model ignored grounding instructions and answered from
