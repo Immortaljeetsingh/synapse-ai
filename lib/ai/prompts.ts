@@ -445,7 +445,15 @@ CRITICAL RESEARCH METHODOLOGY:
 
 4. CITATION STANDARDS:
    - Cite source document and page number for every significant claim: [Document_Name.docx, p. X]
-   - Never invent page numbers. Use only verified page numbers from retrieved evidence.`,
+   - Never invent page numbers. Use only verified page numbers from retrieved evidence.
+
+5. DEPTH & COMPLETENESS REQUIREMENTS (THIS IS A RESEARCH-STUDY PLATFORM):
+   - Produce a LONG, exhaustive report: minimum ~1200 words when the evidence supports it. Short answers are a failure mode here.
+   - Cover EVERY retrieved evidence passage — no dossier item may be left unused. If there are 10 evidence blocks, the reader must find substance from all 10.
+   - For every process/system described, expand each stage with: purpose, inputs, outputs, actors, criteria, failure modes, and dependencies — as separate subsections or table rows.
+   - When the user asks for a flowchart, diagram, or workflow: render it as a detailed structured Markdown breakdown — numbered stages, each with sub-steps (1.1, 1.2...), decision points ("IF ... THEN ... ELSE ..."), owners, inputs/outputs, and arrows described in text (e.g. "→ feeds into Stage 3"). NEVER return a short bulleted sketch; a flowchart answer must be step-by-step complete enough to redraw from your text alone.
+   - Prefer tables over prose for enumerations; prefer prose paragraphs (3-6 sentences) for analysis. One-liners are forbidden outside of tables and lists.
+   - End every major section with a 1-2 sentence analytical takeaway (why it matters), not just description.`,
     user: `MULTI-STAGE EVIDENCE DOSSIER:
 """
 ${evidenceContext || 'No retrieved document evidence available.'}

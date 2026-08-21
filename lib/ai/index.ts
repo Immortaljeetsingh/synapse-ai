@@ -16,40 +16,47 @@ export async function getAIProvider(overrides?: {
   apiKey?: string;
   baseUrl?: string;
 }): Promise<BaseAIProvider> {
-  let dbProvider = overrides?.provider || process.env.AI_PROVIDER || process.env.OPENCODE_ZEN_PROVIDER || 'openrouter';
-  let dbModel = overrides?.model || process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'openai/gpt-oss-20b:free';
-  let dbApiKey = overrides?.apiKey || process.env.AI_API_KEY || process.env.OPENCODE_ZEN_API_KEY || '';
-  let dbBaseUrl = overrides?.baseUrl || process.env.AI_BASE_URL || process.env.OPENCODE_ZEN_BASE_URL || 'https://openrouter.ai/api/v1';
+  // Resolve the full default chain first (env + DB), THEN overlay any
+  // provided override fields individually — a partial override (e.g. only
+  // apiKey from headers) used to skip the DB lookup entirely and jump the
+  // remaining fields back to hardcoded defaults.
+  let provider = process.env.AI_PROVIDER || process.env.OPENCODE_ZEN_PROVIDER || 'openrouter';
+  let model = process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'openai/gpt-oss-20b:free';
+  let apiKey = process.env.AI_API_KEY || process.env.OPENCODE_ZEN_API_KEY || '';
+  let baseUrl = process.env.AI_BASE_URL || process.env.OPENCODE_ZEN_BASE_URL || 'https://openrouter.ai/api/v1';
 
-  if (!overrides?.apiKey) {
-    try {
-      dbProvider = await getSetting('ai_provider', dbProvider);
-      dbModel = await getSetting('ai_model', dbModel);
-      dbApiKey = await getSetting('ai_api_key', dbApiKey);
-      dbBaseUrl = await getSetting('ai_base_url', dbBaseUrl);
-    } catch (e) {
-      console.warn('Could not read settings from DB, using process.env:', e);
-    }
+  try {
+    provider = await getSetting('ai_provider', provider);
+    model = await getSetting('ai_model', model);
+    apiKey = await getSetting('ai_api_key', apiKey);
+    baseUrl = await getSetting('ai_base_url', baseUrl);
+  } catch (e) {
+    console.warn('Could not read settings from DB, using process.env:', e);
   }
 
+  if (overrides?.provider) provider = overrides.provider;
+  if (overrides?.model) model = overrides.model;
+  if (overrides?.apiKey) apiKey = overrides.apiKey;
+  if (overrides?.baseUrl) baseUrl = overrides.baseUrl;
+
   // If no API key at all and not ollama/local, use local fallback
-  if (!dbApiKey && dbProvider !== 'ollama' && dbProvider !== 'local') {
+  if (!apiKey && provider !== 'ollama' && provider !== 'local') {
     return new LocalFallbackProvider();
   }
 
-  switch (dbProvider) {
+  switch (provider) {
     case 'openrouter':
       return new OpenRouterProvider({
-        apiKey: dbApiKey,
-        baseUrl: dbBaseUrl || 'https://openrouter.ai/api/v1',
-        model: dbModel,
+        apiKey,
+        baseUrl: baseUrl || 'https://openrouter.ai/api/v1',
+        model,
       });
 
     case 'opencode_zen':
       return new OpenCodeZenProvider({
-        apiKey: dbApiKey,
-        baseUrl: dbBaseUrl,
-        model: dbModel,
+        apiKey,
+        baseUrl,
+        model,
       });
 
     case 'openai':
@@ -59,9 +66,9 @@ export async function getAIProvider(overrides?: {
     case 'together':
     case 'ollama':
       return new OpenAIProvider({
-        apiKey: dbApiKey || 'ollama-key',
-        baseUrl: dbBaseUrl || 'https://api.openai.com/v1',
-        model: dbModel || (dbProvider === 'ollama' ? 'llama3.2' : 'gpt-4o-mini'),
+        apiKey: apiKey || 'ollama-key',
+        baseUrl: baseUrl || 'https://api.openai.com/v1',
+        model: model || (provider === 'ollama' ? 'llama3.2' : 'gpt-4o-mini'),
       });
 
     case 'local':

@@ -10,18 +10,18 @@ A high-performance, document-grounded research partner and active-recall learnin
 - **Gamified Quiz & Exam Arena**: Generate customizable assessments (5, 10, 15, 20 questions) with instant answer review, streak multipliers, time-tracking, and document citation jump-links.
 - **Active Recall Flashcard Engine**: Smart flashcard generation with front/back flip animations, topic categorization, difficulty rating, and spaced repetition tracking.
 - **Structured Note Generation**: Auto-generate Cornell notes, key executive summaries, error analyses, and actionable bullet takeaways directly from uploaded sources.
-- **Universal AI Provider Architecture**: Seamlessly switch between OpenRouter, OpenAI (GPT-4o / GPT-4o-mini), Groq Cloud (Llama 3.3 70B), DeepSeek API, Together AI, or 100% offline local models via Ollama / LM Studio.
+- **Universal AI Provider Architecture**: Seamlessly switch between OpenCode Zen (free DeepSeek V4 Flash), OpenRouter, OpenAI (GPT-4o / GPT-4o-mini), Groq Cloud (Llama 3.3 70B), DeepSeek API, Together AI, or 100% offline local models via Ollama / LM Studio.
 - **Responsive 3D Black / Metallic Silver Interface**: Fully responsive across mobile, tablet, laptop, and ultrawide desktop viewports with beveled 3D tactile buttons and dark/light mode support.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Framework**: Next.js 14 (App Router, Server Actions & API Routes)
+- **Framework**: Next.js 14 (App Router). All endpoints are consolidated in a single catch-all Route Handler (`app/api/[[...path]]/route.ts`), so the whole app runs inside one serverless function sharing a single warm instance and `/tmp` database.
 - **Language**: TypeScript (Strict type checking)
 - **Styling**: Tailwind CSS & Lucide Icons
 - **Database**: SQLite via `sql.js` (Serverless-compatible embedded DB)
-- **Document Parsers**: `pdf-parse`, `mammoth` (DOCX), `xlsx` (Spreadsheets)
+- **Document Parsers**: `pdf-parse`, `mammoth` (DOCX), `xlsx` (Spreadsheets) — plus client-side PDF extraction via `pdfjs-dist`
 - **Vector Retrieval**: Hybrid BM25 keyword + Cosine similarity semantic retrieval
 
 ---
@@ -47,7 +47,7 @@ cp .env.example .env.local
 Edit `.env.local` with your preferred AI provider credentials:
 
 ```ini
-# Primary Provider ('openrouter', 'openai', 'groq', 'deepseek', 'together', or 'ollama')
+# Primary Provider ('opencode_zen', 'openrouter', 'openai', 'groq', 'deepseek', 'together', or 'ollama')
 AI_PROVIDER=openrouter
 AI_MODEL=openai/gpt-oss-20b:free
 AI_BASE_URL=https://openrouter.ai/api/v1
@@ -92,9 +92,11 @@ npm run start
 - **Zero Secret Commits**: Sensitive files (`.env`, `.env.local`, SQLite databases, uploads) are strictly excluded via `.gitignore`.
 - **Honest Offline Mode**: With no API key configured, the app clearly says AI features are unavailable instead of fabricating document-grounded content.
 
-> **Deployment note**: SQLite data and uploaded files live on the server filesystem (`./data` locally, `/tmp` on Vercel). On serverless platforms storage is ephemeral per warm instance — for durable multi-user persistence, point `DB_PATH`/`UPLOAD_DIR` at a mounted volume or migrate to a hosted database.
+> **Deployment note**: Your browser (IndexedDB) is the source of truth for notebooks, documents, chat history, notes, flashcards, and quiz attempts. The server-side SQLite store (`./data` locally, `/tmp` on Vercel) is best-effort sync — serverless storage is ephemeral per warm instance, so don't rely on it for persistence. For durable multi-user persistence, point `DB_PATH`/`UPLOAD_DIR` at a mounted volume or migrate to a hosted database.
 
-> **Large-file deployment note**: Vercel serverless functions reject request bodies over ~4.5MB (HTTP 413), so the browser extracts text client-side before upload — TXT/MD/CSV are read directly with `file.text()`, and PDFs over 3MB are parsed per-page in-browser via `pdfjs-dist` — then POSTed as JSON to `/api/documents/text`. This bypasses the lambda body limit for PDF/TXT/MD/CSV. DOCX/XLSX have no browser parser and remain capped at the multipart limit (~3.5MB); larger office files must be converted to PDF or split.
+> **Large-file deployment note**: Vercel serverless functions reject request bodies over ~4.5MB (HTTP 413), so the browser extracts text client-side before upload — TXT/MD/CSV are read directly with `file.text()`, and PDFs over ~3MB are parsed per-page in-browser via `pdfjs-dist` — then POSTed as JSON to `/api/documents/text`. This bypasses the lambda body limit for PDF/TXT/MD/CSV. DOCX/XLSX have no browser parser and remain capped at the multipart limit (~3.5MB); larger office files must be converted to PDF or split.
+
+> **Memory model**: The AI model itself is stateless — no server-side conversation memory. Each chat request injects the last ~3 exchanges (each message truncated, total capped) as context into the prompt, so the model always answers grounded in recent conversation plus retrieved document chunks.
 
 ---
 

@@ -106,30 +106,57 @@ export class OpenCodeZenProvider extends BaseAIProvider {
       requestBody.response_format = { type: 'json_object' };
     }
 
-    const response = await this.retryWithBackoff(async () => {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
+    // Attach HTTP status so base.ts retryWithBackoff's 400/401 no-retry
+    // guard actually fires instead of blindly retrying client errors.
+    const fail = (message: string, status?: number): never => {
+      const err: any = new Error(message);
+      if (status !== undefined) err.status = status;
+      throw err;
+    };
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        if (res.status === 401) {
-          throw new Error(`OpenCode Zen authentication failed (401). Check your API Key: ${errorText}`);
-        } else if (res.status === 429) {
-          throw new Error(`OpenCode Zen rate limit reached (429). Please wait a moment and try again.`);
-        } else if (res.status === 404) {
-          throw new Error(`Model '${this.model}' was not found on ${this.baseUrl}.`);
+    const sendRequest = () =>
+      this.retryWithBackoff(async () => {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          if (res.status === 401) {
+            fail(`OpenCode Zen authentication failed (401). Check your API Key: ${errorText}`, 401);
+          } else if (res.status === 429) {
+            fail(`OpenCode Zen rate limit reached (429). Please wait a moment and try again.`, 429);
+          } else if (res.status === 404) {
+            fail(`Model '${this.model}' was not found on ${this.baseUrl}.`, 404);
+          }
+          fail(`OpenCode Zen API error (${res.status}): ${errorText}`, res.status);
         }
-        throw new Error(`OpenCode Zen API error (${res.status}): ${errorText}`);
-      }
 
-      return res;
-    }, 2, 800);
+        return res;
+      }, 2, 800);
+
+    let response;
+    try {
+      response = await sendRequest();
+    } catch (err: any) {
+      // Some models reject response_format json_object with a 400 — retry
+      // once without it and rely on prompt instructions + JSON repair.
+      if (
+        err?.status === 400 &&
+        requestBody.response_format &&
+        /response_format|json/i.test(String(err?.message || ''))
+      ) {
+        delete requestBody.response_format;
+        response = await sendRequest();
+      } else {
+        throw err;
+      }
+    }
 
     const data = await response.json();
     const replyText = data.choices?.[0]?.message?.content || '';

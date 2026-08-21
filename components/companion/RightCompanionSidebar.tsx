@@ -97,6 +97,21 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
   isUploading = false,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [generatingTypes, setGeneratingTypes] = useState<Set<string>>(new Set());
+
+  // Track per-artifact generation so tabs can show their skeleton states
+  const handleRegenerate = async (type: string) => {
+    setGeneratingTypes((prev) => new Set(prev).add(type));
+    try {
+      await onRegenerateArtifact(type);
+    } finally {
+      setGeneratingTypes((prev) => {
+        const next = new Set(prev);
+        next.delete(type);
+        return next;
+      });
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -167,12 +182,10 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
             overview={artifacts.overview || null}
             topics={artifacts.topics || []}
             concepts={artifacts.concepts || []}
-            entities={artifacts.entities || []}
             numbers={artifacts.numbers || []}
-            timeline={artifacts.timeline || []}
-            actionItems={artifacts.action_items || []}
+            isLoading={generatingTypes.has('overview')}
             onAskQuestion={onAskQuestion}
-            onRegenerate={onRegenerateArtifact}
+            onRegenerate={handleRegenerate}
           />
         )}
 
@@ -197,7 +210,8 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
         {activeTab === 'study_guide' && (
           <StudyGuideTab
             studyGuide={artifacts.study_guide || null}
-            onRegenerate={() => onRegenerateArtifact('study_guide')}
+            isLoading={generatingTypes.has('study_guide')}
+            onRegenerate={() => handleRegenerate('study_guide')}
           />
         )}
 
@@ -214,7 +228,8 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
         {activeTab === 'compare' && (
           <CompareTab
             comparison={artifacts.comparison || null}
-            onRegenerate={() => onRegenerateArtifact('comparison')}
+            isLoading={generatingTypes.has('comparison')}
+            onRegenerate={() => handleRegenerate('comparison')}
           />
         )}
 

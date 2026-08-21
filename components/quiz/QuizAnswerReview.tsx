@@ -121,7 +121,7 @@ export const QuizAnswerReview: React.FC<QuizAnswerReviewProps> = ({
                 <div className="flex items-center gap-2">
                   {isCorrect ? (
                     <span className="text-emerald-400 font-semibold flex items-center gap-1 text-xs">
-                      <CheckCircle2 className="w-4 h-4" /> Correct (+{userAnsRecord?.points_earned || 100} pts)
+                      <CheckCircle2 className="w-4 h-4" /> Correct (+{userAnsRecord?.points_awarded ?? userAnsRecord?.points_earned ?? 0} pts)
                     </span>
                   ) : (
                     <span className="text-rose-400 font-semibold flex items-center gap-1 text-xs">

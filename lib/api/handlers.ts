@@ -88,6 +88,13 @@ function detectIntent(message: string): {
     lower.includes('quiz me') ||
     lower.includes('start quiz') ||
     lower.includes('create quiz') ||
+    lower.includes('create a quiz') ||
+    lower.includes('generate a quiz') ||
+    lower.includes('make me a quiz') ||
+    lower.includes('quiz about') ||
+    lower.includes('quiz on') ||
+    // bare "quiz" followed by a number, e.g. "quiz 10 questions"
+    /\bquiz\s*\d/.test(lower) ||
     lower.includes('practice test') ||
     lower.includes('test me')
   ) {
@@ -104,8 +111,14 @@ function detectIntent(message: string): {
     lower.includes('benchmark') ||
     lower.includes('process map') ||
     lower.includes('process mapping') ||
+    lower.includes('flowchart') ||
+    lower.includes('flow chart') ||
+    lower.includes('diagram') ||
+    lower.includes('workflow of') ||
     lower.includes('comprehensive analysis') ||
     lower.includes('detailed analysis') ||
+    lower.includes('detailed report') ||
+    lower.includes('in detail') ||
     lower.includes('exhaustive') ||
     lower.includes('compare the documents') ||
     lower.includes('cross-document') ||
@@ -167,61 +180,74 @@ async function indexParsedDocument(
 ) {
   const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  const rawChunks = chunkDocument(parsed, docId, notebookId, rawFilename, {
-    targetChunkSize: 900,
-    overlapSize: 120,
-  });
+  // Atomic indexing: the row lands as 'processing' so a mid-flight crash
+  // never leaves a phantom 'ready' document with zero chunks behind.
+  try {
+    const rawChunks = chunkDocument(parsed, docId, notebookId, rawFilename, {
+      targetChunkSize: 900,
+      overlapSize: 120,
+    });
 
-  const processedChunks: DocumentChunk[] = rawChunks.map((chunk) => ({
-    ...chunk,
-    embedding_json: JSON.stringify(computeTextVector(chunk.text + ' ' + chunk.section_heading)),
-  }));
+    const processedChunks: DocumentChunk[] = rawChunks.map((chunk) => ({
+      ...chunk,
+      embedding_json: JSON.stringify(computeTextVector(chunk.text + ' ' + chunk.section_heading)),
+    }));
 
-  const document = await createDocument({
-    id: docId,
-    notebook_id: notebookId,
-    filename: rawFilename,
-    file_type: fileType,
-    file_size: fileSize,
-    page_count: parsed.pageCount || 1,
-    file_path: filePath,
-    content_hash: contentHash,
-    processing_status: 'ready',
-    is_scanned: parsed.isScanned,
-  });
+    const document = await createDocument({
+      id: docId,
+      notebook_id: notebookId,
+      filename: rawFilename,
+      file_type: fileType,
+      file_size: fileSize,
+      page_count: parsed.pageCount || 1,
+      file_path: filePath,
+      content_hash: contentHash,
+      processing_status: 'processing',
+      is_scanned: parsed.isScanned,
+    });
 
-  await insertChunks(processedChunks);
+    await insertChunks(processedChunks);
 
-  await createNote({
-    id: `note_init_${docId}_${Date.now()}`,
-    notebook_id: notebookId,
-    title: `📌 Overview: ${rawFilename}`,
-    content: `### Document Overview: ${rawFilename}\n\n**Total Pages:** ${parsed.pageCount}\n**Total Chunks:** ${processedChunks.length}\n\n#### Key Sections Detected:\n${processedChunks.slice(0, 5).map((c) => `- **${c.section_heading || 'Section'}**: ${c.text.slice(0, 140)}...`).join('\n')}\n\n---\n*Ready for grounded Q&A, active-recall study flashcards, and practice quiz generation.*`,
-    format_type: 'cornell',
-  });
+    await createNote({
+      id: `note_init_${docId}_${Date.now()}`,
+      notebook_id: notebookId,
+      title: `📌 Overview: ${rawFilename}`,
+      content: `### Document Overview: ${rawFilename}\n\n**Total Pages:** ${parsed.pageCount}\n**Total Chunks:** ${processedChunks.length}\n\n#### Key Sections Detected:\n${processedChunks.slice(0, 5).map((c) => `- **${c.section_heading || 'Section'}**: ${c.text.slice(0, 140)}...`).join('\n')}\n\n---\n*Ready for grounded Q&A, active-recall study flashcards, and practice quiz generation.*`,
+      format_type: 'cornell',
+    });
 
-  const lightweightChunks = processedChunks.map((c) => ({
-    id: c.id,
-    document_id: docId,
-    notebook_id: notebookId,
-    chunk_index: c.chunk_index,
-    page_number: c.page_number,
-    section_heading: c.section_heading,
-    text: c.text,
-    filename: rawFilename,
-  }));
+    await updateDocumentStatus(docId, 'ready');
 
-  // Echo pages back so the browser can render the drawer statelessly
-  // (each Vercel Lambda has its own /tmp DB — server reads aren't reliable).
-  // ponytail: shared 3M-char budget covers both upload paths here.
-  let charBudget = MAX_TEXT_CHARS;
-  const pages = parsed.pages.map((p) => {
-    const text = charBudget > 0 ? p.text.slice(0, charBudget) : '';
-    charBudget -= text.length;
-    return { pageNumber: p.pageNumber, text };
-  });
+    const lightweightChunks = processedChunks.map((c) => ({
+      id: c.id,
+      document_id: docId,
+      notebook_id: notebookId,
+      chunk_index: c.chunk_index,
+      page_number: c.page_number,
+      section_heading: c.section_heading,
+      text: c.text,
+      filename: rawFilename,
+    }));
 
-  return { document, lightweightChunks, chunkCount: processedChunks.length, pageCount: parsed.pageCount, pages };
+    // Echo pages back so the browser can render the drawer statelessly
+    // (each Vercel Lambda has its own /tmp DB — server reads aren't reliable).
+    // ponytail: shared 3M-char budget covers both upload paths here.
+    let charBudget = MAX_TEXT_CHARS;
+    const pages = parsed.pages.map((p) => {
+      const text = charBudget > 0 ? p.text.slice(0, charBudget) : '';
+      charBudget -= text.length;
+      return { pageNumber: p.pageNumber, text };
+    });
+
+    return { document, lightweightChunks, chunkCount: processedChunks.length, pageCount: parsed.pageCount, pages };
+  } catch (err: any) {
+    try {
+      await updateDocumentStatus(docId, 'error', { error_message: err?.message || 'Indexing failed' });
+    } catch {
+      // Row may not exist yet if createDocument itself threw — nothing to mark.
+    }
+    throw err;
+  }
 }
 
 async function indexDocumentFile(
@@ -249,6 +275,8 @@ async function handleChat(req: Request) {
   if (!notebookId || !message) {
     return json({ success: false, error: 'notebookId and message are required' }, 400);
   }
+
+  await ensureNotebookRow(notebookId);
 
   const { getOrCreateChatSession, getChatMessages, insertChatMessage } = await import('@/lib/db/queries');
   const session = await getOrCreateChatSession(notebookId);
@@ -302,10 +330,15 @@ async function handleChat(req: Request) {
         .join('\n\n')
         .slice(0, 1600);
       const prompt = PROMPTS.DEEP_RESEARCH_REPORT(deepRetrieval.groundedContextText, historyText, message);
-      const completion = await ai.generateText([
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ]);
+      const completion = await ai.generateText(
+        [
+          { role: 'system', content: prompt.system },
+          { role: 'user', content: prompt.user },
+        ],
+        // Deep research must be long-form; 16K tokens of headroom while
+        // staying inside the 60s serverless limit.
+        { maxTokens: 16000 }
+      );
       replyText = completion.text;
       groundingType = 'direct_source';
       specialPayload = {
@@ -428,19 +461,23 @@ async function handleChat(req: Request) {
         '',
         `Provide comprehensive, structured research notes on: ${message}`
       );
-      const completion = await ai.generateText([
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ]);
+      const completion = await ai.generateText(
+        [
+          { role: 'system', content: prompt.system },
+          { role: 'user', content: prompt.user },
+        ],
+        { maxTokens: 16000 }
+      );
       replyText = completion.text;
 
-      await createNote({
+      const note = await createNote({
         id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         notebook_id: notebookId,
         title: `Research Notes: ${sourceDoc}`,
         content: replyText,
         format_type: 'cornell',
       });
+      specialPayload = { type: 'note_created', note };
     } else {
       const retrieval = await hybridRetrieve(notebookId, message, {
         topK: 6,
@@ -532,6 +569,8 @@ async function handleQuizGenerate(req: Request) {
   if (!notebookId) {
     return json({ success: false, error: 'notebookId is required' }, 400);
   }
+
+  await ensureNotebookRow(notebookId);
 
   const targetCount = Math.max(3, Math.min(parseInt(String(questionCount), 10) || 10, 30));
 
@@ -647,6 +686,8 @@ async function handleArtifactsPost(req: Request) {
     return json({ success: false, error: 'notebookId and artifactType are required' }, 400);
   }
 
+  await ensureNotebookRow(notebookId);
+
   const { getChunksByNotebook, getDocumentsByNotebook, insertFlashcards, deleteFlashcardsByNotebook } =
     await import('@/lib/db/queries');
   // Client-provided chunks win — the browser is the source of truth on
@@ -746,27 +787,31 @@ async function handleArtifactsPost(req: Request) {
         { role: 'system', content: prompt.system },
         { role: 'user', content: prompt.user },
       ]);
-      if (data.flashcards && data.flashcards.length > 0) {
-        // Replace the deck instead of appending — regenerating used to
-        // duplicate every card on every click.
-        await deleteFlashcardsByNotebook(notebookId);
-        const cards: FlashcardRecord[] = data.flashcards.map((c, i) => ({
-          id: `fc_regen_${Date.now()}_${i}`,
-          notebook_id: notebookId,
-          document_id: null,
-          card_type: c.card_type || 'conceptual',
-          question: c.question,
-          answer: c.answer,
-          topic: c.topic || 'General',
-          difficulty: c.difficulty || 'medium',
-          source_document: primaryDocName,
-          page_number: 1,
-          review_status: 'unreviewed',
-          created_at: new Date().toISOString(),
-        }));
-        await insertFlashcards(cards);
-        generatedData = cards;
+      if (!(data.flashcards && data.flashcards.length > 0)) {
+        return json(
+          { success: false, error: 'No flashcards could be generated from this notebook\'s documents. Please try again.' },
+          502
+        );
       }
+      // Replace the deck instead of appending — regenerating used to
+      // duplicate every card on every click.
+      await deleteFlashcardsByNotebook(notebookId);
+      const cards: FlashcardRecord[] = data.flashcards.map((c, i) => ({
+        id: `fc_regen_${Date.now()}_${i}`,
+        notebook_id: notebookId,
+        document_id: null,
+        card_type: c.card_type || 'conceptual',
+        question: c.question,
+        answer: c.answer,
+        topic: c.topic || 'General',
+        difficulty: c.difficulty || 'medium',
+        source_document: primaryDocName,
+        page_number: 1,
+        review_status: 'unreviewed',
+        created_at: new Date().toISOString(),
+      }));
+      await insertFlashcards(cards);
+      generatedData = cards;
       break;
     }
     case 'comparison': {
@@ -794,6 +839,8 @@ async function handleNotesGenerate(req: Request) {
   if (!notebookId) {
     return json({ success: false, error: 'notebookId is required' }, 400);
   }
+
+  await ensureNotebookRow(notebookId);
 
   const { getChunksByNotebook, getDocumentsByNotebook } = await import('@/lib/db/queries');
   const ai = await getAIProvider(CREDENTIAL_HEADERS(req, body));
@@ -878,12 +925,18 @@ async function handleNotesGenerate(req: Request) {
       },
     ];
 
+    // Human-readable content — the raw JSON blob used to render as the note
+    // body; structured data lives in source_references_json instead.
+    const sourceListMd = sourceReferences
+      .map((r) => `- **${r.document_name}** — pages ${r.pages.join(', ') || 'n/a'}`)
+      .join('\n');
+
     const note = await import('@/lib/db/queries').then((q) =>
       q.createNote({
         id: `note_deep_${Date.now()}`,
         notebook_id: notebookId,
         title: `Deep Notes & Audit: ${docName}`,
-        content: JSON.stringify(sourceReferences),
+        content: `### Deep Notes & Audit\n\n**Sources used:**\n${sourceListMd}\n\nSee the generated notes below for the full breakdown.`,
         format_type: format || 'cornell',
         is_pinned: 0,
         source_references_json: JSON.stringify(sourceReferences),
@@ -1098,6 +1151,15 @@ export async function handleApi(req: Request): Promise<Response> {
 
       const path = await import('path');
       const rawFilename = path.basename(String(filename));
+      // Same extension allowlist as the multipart path — a .exe masquerading
+      // as extracted text must not slip through.
+      const ext = path.extname(rawFilename).toLowerCase();
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        return json(
+          { success: false, error: `Unsupported file type "${ext}". Supported formats: PDF, DOCX, XLSX, CSV, TXT, MD.` },
+          415
+        );
+      }
       const crypto = await import('crypto');
       const contentHash = crypto.createHash('sha256').update(fullText).digest('hex');
 
@@ -1245,6 +1307,7 @@ export async function handleApi(req: Request): Promise<Response> {
         if (!body.notebookId || !body.question || !body.answer) {
           return json({ success: false, error: 'notebookId, question, and answer are required' }, 400);
         }
+        await ensureNotebookRow(body.notebookId);
         const card: FlashcardRecord = {
           id: `fc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           notebook_id: body.notebookId,
@@ -1295,6 +1358,7 @@ export async function handleApi(req: Request): Promise<Response> {
         const body = await readBody(req);
         const { notebookId, title, content, format_type, is_pinned, source_references } = body;
         if (!notebookId) return json({ success: false, error: 'notebookId is required' }, 400);
+        await ensureNotebookRow(notebookId);
         const note = await createNote({
           id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           notebook_id: notebookId,
@@ -1392,18 +1456,24 @@ export async function handleApi(req: Request): Promise<Response> {
         if (!quizId || !notebookId) {
           return json({ success: false, error: 'quizId and notebookId are required' }, 400);
         }
+        // Coerce client numerics — strings/NaN from the UI used to poison
+        // the numeric columns on insert.
+        const num = (v: any) => {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : 0;
+        };
         const attempt = await recordQuizAttempt({
           id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           quiz_id: quizId,
           notebook_id: notebookId,
           title,
-          score,
-          total_questions: totalQuestions,
-          correct_count: correctCount,
-          accuracy_pct: accuracyPct,
-          xp_earned: xpEarned,
-          max_streak: maxStreak,
-          time_spent_seconds: timeSpentSeconds,
+          score: num(score),
+          total_questions: num(totalQuestions),
+          correct_count: num(correctCount),
+          accuracy_pct: num(accuracyPct),
+          xp_earned: num(xpEarned),
+          max_streak: num(maxStreak),
+          time_spent_seconds: num(timeSpentSeconds),
           answers: answers || [],
         });
         return json({ success: true, attempt });
@@ -1459,10 +1529,11 @@ export async function handleApi(req: Request): Promise<Response> {
       const notebookId = sp.get('notebookId');
       const query = sp.get('q')?.trim() || '';
       if (!notebookId || !query) {
-        return json({ success: true, results: [] });
+        return json({ success: false, error: 'notebookId and q (search query) are required' }, 400);
       }
 
-      const likeQuery = `%${query}%`;
+      // Escape LIKE wildcards so user input like "50%" or "a_b" matches literally
+      const likeQuery = `%${query.replace(/[%_]/g, (m) => `[${m}]`)}%`;
       const chunks = await queryAll<any>(
         `SELECT c.id, c.document_id, c.page_number, c.section_heading, c.text, d.filename
          FROM document_chunks c

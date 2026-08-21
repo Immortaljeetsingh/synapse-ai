@@ -36,13 +36,25 @@ export function parseAndRepairJson<T = any>(rawText: string): T {
   }
 
   // Common JSON repair operations
+  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+  // Key-fix + comment-strip must skip double-quoted spans — applied globally
+  // they corrupted values like { "url": "https://x.com" } into broken JSON.
+  // Split with a capturing group: odd indices are exactly the string ranges.
   cleaned = cleaned
-    // Remove trailing commas before } or ]
-    .replace(/,\s*([}\]])/g, '$1')
-    // Fix unquoted keys (e.g. { key: "value" } -> { "key": "value" })
-    .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
-    // Remove single line comments — but not "//" inside URLs (https://...)
-    .replace(/(?<!:)\/\/[^\n\r]*/g, '')
+    .split(/("(?:[^"\\]|\\.)*")/g)
+    .map((segment, i) =>
+      i % 2 === 1
+        ? segment
+        : segment
+            // Fix unquoted keys (e.g. { key: "value" } -> { "key": "value" })
+            .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
+            // Remove single line comments — but not "//" inside URLs (https://...)
+            .replace(/(?<!:)\/\/[^\n\r]*/g, '')
+    )
+    .join('');
+
+  cleaned = cleaned
     // Replace single quotes with double quotes around simple string values
     .replace(/:\s*'([^']*)'/g, ': "$1"');
 

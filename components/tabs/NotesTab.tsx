@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   StickyNote,
   Plus,
@@ -40,6 +40,13 @@ export const NotesTab: React.FC<NotesTabProps> = ({
   const [newContent, setNewContent] = useState('');
   const [newFormat, setNewFormat] = useState<NoteFormatType>('cornell');
   const [isGenerating, setIsGenerating] = useState(false);
+  // Local editor draft is the source of truth while typing; persisted via debounced onUpdateNote.
+  const [draft, setDraft] = useState<{ id: string; title: string; content: string } | null>(null);
+  const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const pendingRef = useRef<Record<string, Partial<NoteRecord>>>({});
+  const selectNewNoteRef = useRef(false);
+  const onUpdateNoteRef = useRef(onUpdateNote);
+  onUpdateNoteRef.current = onUpdateNote;
 
   // Sync active note if deleted or updated
   React.useEffect(() => {
@@ -48,13 +55,72 @@ export const NotesTab: React.FC<NotesTabProps> = ({
     }
   }, [notes, activeNoteId]);
 
+  // Select a freshly created note (parent prepends it at index 0)
+  React.useEffect(() => {
+    if (selectNewNoteRef.current && notes.length > 0) {
+      selectNewNoteRef.current = false;
+      setActiveNoteId(notes[0].id);
+    }
+  }, [notes]);
+
+  // Flush any pending debounced save on unmount
+  React.useEffect(() => {
+    const timers = timersRef.current;
+    const pending = pendingRef.current;
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+      for (const [id, updates] of Object.entries(pending)) {
+        if (Object.keys(updates).length > 0) onUpdateNoteRef.current(id, updates);
+      }
+    };
+  }, []);
+
+  const cancelPending = (id: string) => {
+    if (timersRef.current[id]) {
+      clearTimeout(timersRef.current[id]);
+      delete timersRef.current[id];
+    }
+    delete pendingRef.current[id];
+  };
+
+  const flushNote = (id: string) => {
+    if (timersRef.current[id]) {
+      clearTimeout(timersRef.current[id]);
+      delete timersRef.current[id];
+    }
+    const pending = pendingRef.current[id];
+    if (pending && Object.keys(pending).length > 0) {
+      delete pendingRef.current[id];
+      onUpdateNote(id, pending);
+    }
+  };
+
+  const scheduleUpdate = (id: string, updates: Partial<NoteRecord>) => {
+    pendingRef.current[id] = { ...pendingRef.current[id], ...updates };
+    if (timersRef.current[id]) clearTimeout(timersRef.current[id]);
+    timersRef.current[id] = setTimeout(() => {
+      delete timersRef.current[id];
+      const pending = pendingRef.current[id];
+      delete pendingRef.current[id];
+      if (pending && Object.keys(pending).length > 0) onUpdateNote(id, pending);
+    }, 400);
+  };
+
   const filteredNotes = notes.filter(
     (n) =>
       n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       n.content.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Pinned notes first, newest within each group
+  const sortedNotes = [...filteredNotes].sort((a, b) => {
+    const pinDiff = (b.is_pinned || 0) - (a.is_pinned || 0);
+    if (pinDiff !== 0) return pinDiff;
+    return (b.created_at || '').localeCompare(a.created_at || '');
+  });
+
   const activeNote = notes.find((n) => n.id === activeNoteId) || notes[0];
+  const activeDraft = draft && activeNote && draft.id === activeNote.id ? draft : null;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,6 +143,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
       format_type: newFormat,
     });
 
+    selectNewNoteRef.current = true;
     setNewTitle('');
     setNewContent('');
     setIsCreating(false);
@@ -195,12 +262,18 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               )}
             </div>
           ) : (
-            filteredNotes.map((note) => {
+            sortedNotes.map((note) => {
               const isSelected = activeNote?.id === note.id;
               return (
                 <div
                   key={note.id}
-                  onClick={() => setActiveNoteId(note.id)}
+                  onClick={() => {
+                    if (activeNote && activeNote.id !== note.id) {
+                      flushNote(activeNote.id);
+                      setDraft(null);
+                    }
+                    setActiveNoteId(note.id);
+                  }}
                   className={`group p-3 rounded-xl text-xs cursor-pointer transition-all ${
                     isSelected
                       ? 'bg-neutral-850 text-neutral-100 border border-neutral-700 shadow-3d-sm'
@@ -302,8 +375,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({
               <div className="flex items-center gap-3">
                 <input
                   type="text"
-                  value={activeNote.title}
-                  onChange={(e) => onUpdateNote(activeNote.id, { title: e.target.value })}
+                  value={activeDraft ? activeDraft.title : activeNote.title}
+                  onChange={(e) => {
+                    setDraft({
+                      id: activeNote.id,
+                      title: e.target.value,
+                      content: activeDraft ? activeDraft.content : activeNote.content,
+                    });
+                    scheduleUpdate(activeNote.id, { title: e.target.value });
+                  }}
+                  onBlur={() => flushNote(activeNote.id)}
                   className="bg-transparent font-semibold text-sm text-neutral-100 focus:outline-none focus:border-b border-neutral-600 px-1"
                 />
                 {getFormatBadge(activeNote.format_type, activeNote.title)}
@@ -333,6 +414,7 @@ export const NotesTab: React.FC<NotesTabProps> = ({
                 <button
                   onClick={() => {
                     if (confirm(`Delete note "${activeNote.title}"?`)) {
+                      cancelPending(activeNote.id);
                       onDeleteNote(activeNote.id);
                     }
                   }}
@@ -347,8 +429,16 @@ export const NotesTab: React.FC<NotesTabProps> = ({
             {/* Note Content Editor */}
             <div className="flex-1 p-6 overflow-y-auto">
               <textarea
-                value={activeNote.content}
-                onChange={(e) => onUpdateNote(activeNote.id, { content: e.target.value })}
+                value={activeDraft ? activeDraft.content : activeNote.content}
+                onChange={(e) => {
+                  setDraft({
+                    id: activeNote.id,
+                    title: activeDraft ? activeDraft.title : activeNote.title,
+                    content: e.target.value,
+                  });
+                  scheduleUpdate(activeNote.id, { content: e.target.value });
+                }}
+                onBlur={() => flushNote(activeNote.id)}
                 className="w-full h-full bg-transparent text-xs text-neutral-200 font-mono leading-relaxed resize-none focus:outline-none placeholder-neutral-600 select-text"
                 placeholder="Write your research notes here..."
               />

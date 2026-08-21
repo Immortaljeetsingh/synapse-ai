@@ -103,8 +103,12 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
           className="hidden"
           onChange={async (e) => {
-            if (e.target.files && e.target.files.length > 0) {
-              await onUploadFiles(e.target.files);
+            try {
+              if (e.target.files && e.target.files.length > 0) {
+                await onUploadFiles(e.target.files);
+              }
+            } finally {
+              e.target.value = '';
             }
           }}
         />

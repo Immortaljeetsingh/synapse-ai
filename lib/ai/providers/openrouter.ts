@@ -38,9 +38,9 @@ export class OpenRouterProvider extends BaseAIProvider {
     max_tokens: maxTokens,
   };
 
-  // gpt-oss is a reasoning model — at default effort it burns thousands of
-  // thinking tokens before answering, blowing past the 60s function limit.
-  if (this.model.toLowerCase().includes('gpt-oss')) {
+  // Reasoning models burn thousands of thinking tokens at default effort
+  // before answering, blowing past the 60s function limit — damp them all.
+  if (/gpt-oss|o1|o3|o4|deepseek-r1|qwen.*think|thinking/i.test(this.model)) {
     requestBody.reasoning = { effort: 'low' };
   }
 

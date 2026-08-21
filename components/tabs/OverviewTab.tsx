@@ -15,10 +15,7 @@ import {
   OverviewArtifact,
   TopicItem,
   ConceptItem,
-  EntityItem,
   NumberStatisticItem,
-  TimelineEvent,
-  ActionItem,
 } from '@/lib/types';
 import { SynapseLogo } from '@/components/brand/SynapseLogo';
 
@@ -26,10 +23,7 @@ interface OverviewTabProps {
   overview: OverviewArtifact | null;
   topics: TopicItem[];
   concepts: ConceptItem[];
-  entities: EntityItem[];
   numbers: NumberStatisticItem[];
-  timeline: TimelineEvent[];
-  actionItems: ActionItem[];
   isLoading?: boolean;
   onAskQuestion: (question: string) => void;
   onRegenerate: (type: string) => Promise<void>;
@@ -39,10 +33,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   overview,
   topics = [],
   concepts = [],
-  entities = [],
   numbers = [],
-  timeline = [],
-  actionItems = [],
   isLoading = false,
   onAskQuestion,
   onRegenerate,

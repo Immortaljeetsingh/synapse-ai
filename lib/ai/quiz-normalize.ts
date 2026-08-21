@@ -3,8 +3,11 @@ import { QuizQuestionItem } from '@/lib/types';
 /**
  * Normalizes AI-generated quiz questions into a consistent shape.
  *
- * Fixes two grading-corruption bugs:
- * - Options are letter-prefixed exactly once ("A) ...").
+ * Fixes several grading-corruption bugs:
+ * - Options are letter-prefixed exactly once ("A) ..."); true_false without
+ *   options gets ["True", "False"] synthesized.
+ * - Questions with an empty/whitespace correct_answer are dropped — better
+ *   a shorter quiz than a silently wrong answer key.
  * - `correct_answer` is normalized to the FULL prefixed option text:
  *   bare letters ("B"), unprefixed text ("Capital adequacy") and prefixed
  *   text ("B) Capital adequacy") all resolve to the exact option string,
@@ -21,16 +24,25 @@ export function normalizeQuizQuestions(
     .filter((q) => q && clean(q.question))
     .map((q, i) => {
       let options: string[] = Array.isArray(q.options) ? q.options.map((opt: any) => clean(opt)).filter(Boolean) : [];
+      if (options.length < 2 && q.question_type === 'true_false') {
+        // Model omitted the True/False pair — synthesize it rather than drop
+        options = ['True', 'False'];
+      }
       if (options.length < 2) {
         // Malformed options from the model — skip rather than fabricate a broken question
         return null;
       }
       options = options.slice(0, 6).map((opt: string, idx: number) => {
-        const alreadyPrefixed = /^[A-F]\)\s/.test(opt);
+        // Junk letter prefixes sit on the FIRST char only ("A) ", "B. ")
+        const alreadyPrefixed = /^\s*[A-Fa-f][.)]\s+/.test(opt);
         return alreadyPrefixed ? opt : `${String.fromCharCode(65 + idx)}) ${opt}`;
       });
 
       const rawAnswer = clean(q.correct_answer);
+      if (!rawAnswer) {
+        // No answer key — never default to options[0]; drop the question
+        return null;
+      }
       let correct = rawAnswer;
 
       // Bare letter ("b", "B)", "B.") → resolve to that option
@@ -43,7 +55,9 @@ export function normalizeQuizQuestions(
       } else {
         // Exact or prefix match against the normalized options
         const exact = options.find((o: string) => o === rawAnswer);
-        const prefixed = options.find((o: string) => o.substring(3).toLowerCase() === rawAnswer.toLowerCase());
+        const prefixed = options.find(
+          (o: string) => o.replace(/^[A-Fa-f]\)\s*/, '').toLowerCase() === rawAnswer.toLowerCase()
+        );
         const startsWith = options.find((o: string) => o.startsWith(rawAnswer));
         correct = exact || prefixed || startsWith || rawAnswer;
       }

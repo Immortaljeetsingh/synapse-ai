@@ -21,7 +21,11 @@
 # Local SQLite databases and persistent runtime storage
 /data/*.db
 /data/*.db-journal
+/data/*.db-wal
+/data/*.db-shm
 /data/*.sqlite
+*.db-wal
+*.db-shm
 /uploads/*
 !/uploads/.gitkeep
 

@@ -16,6 +16,21 @@ import {
 } from 'lucide-react';
 import { QuizQuestionItem, QuizAnswerRecord, QuizConfig } from '@/lib/types';
 
+const stripPrefix = (s: string) => s.replace(/^[A-Fa-f]\)\s*/, '');
+const letterOf = (s: string) => (/^[A-Fa-f]\)/.test(s) ? s.charAt(0).toUpperCase() : '');
+
+// Legacy rows may store a bare letter ("B") as correct_answer; those match the
+// option whose prefix letter equals it. Exact/prefixed equality is untouched.
+const matchesCorrectAnswer = (option: string, correctAnswer: string): boolean => {
+  const opt = option.trim();
+  const ans = correctAnswer.trim();
+  if (!opt || !ans) return false;
+  if (opt === ans) return true;
+  if (stripPrefix(opt).toLowerCase() === stripPrefix(ans).toLowerCase()) return true;
+  if (letterOf(opt) !== '' && letterOf(opt) === letterOf(ans)) return true;
+  return /^[A-Fa-f]$/.test(ans) && opt.toUpperCase().startsWith(`${ans.toUpperCase()})`);
+};
+
 interface QuizGameEngineProps {
   questions: QuizQuestionItem[];
   config: QuizConfig;
@@ -64,6 +79,10 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
 
   const currentQ = questions[currentIndex];
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const advanceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const submittedRef = useRef(false);
+  const selectedRef = useRef<string | null>(null);
+  const lastAdvancedRef = useRef(-1);
 
   const advanceNext = useCallback(
     (
@@ -72,6 +91,14 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
       currentXp: number,
       bestStreak: number
     ) => {
+      // Guard against double-advance (exam auto-advance racing a manual/keyboard advance)
+      if (lastAdvancedRef.current === currentIndex) return;
+      lastAdvancedRef.current = currentIndex;
+      if (advanceTimeoutRef.current) {
+        clearTimeout(advanceTimeoutRef.current);
+        advanceTimeoutRef.current = null;
+      }
+
       if (currentIndex + 1 < questions.length) {
         setCurrentIndex((idx) => idx + 1);
         setSelectedOption(null);
@@ -100,6 +127,8 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
 
   const evaluateAnswer = useCallback(
     (chosenOpt: string | null) => {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
       if (timerRef.current) clearInterval(timerRef.current);
 
       const timeSpent = Math.round((Date.now() - questionStartTime) / 1000);
@@ -107,17 +136,7 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
       // Strict grading: the server normalizes correct_answer to the exact
       // prefixed option string, so equality is the primary check. The letter
       // fallbacks only handle legacy rows stored before normalization.
-      const correctAns = currentQ?.correct_answer?.trim() || '';
-      const chosenTrim = chosenOpt ? chosenOpt.trim() : '';
-      const stripPrefix = (s: string) => s.replace(/^[A-Fa-f]\)\s*/, '');
-      const letterOf = (s: string) => (s.length > 1 && /^[A-Fa-f]\)/.test(s) ? s.charAt(0).toUpperCase() : '');
-
-      const isMatch =
-        chosenOpt !== null &&
-        chosenTrim !== '' &&
-        (chosenTrim === correctAns ||
-          stripPrefix(chosenTrim).toLowerCase() === stripPrefix(correctAns).toLowerCase() ||
-          (letterOf(chosenTrim) !== '' && letterOf(chosenTrim) === letterOf(correctAns)));
+      const isMatch = chosenOpt !== null && matchesCorrectAnswer(chosenOpt, currentQ?.correct_answer || '');
 
       setIsCorrect(isMatch);
       setIsAnswerSubmitted(true);
@@ -135,10 +154,13 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
         if (timeSpent < 10) points += 20;
 
         newStreak = streak + 1;
-        const streakMultiplier = Math.min(newStreak, 5);
-        points = Math.round(points * (1 + (streakMultiplier - 1) * 0.2));
+        if (config.enableStreaks) {
+          const streakMultiplier = Math.min(newStreak, 5);
+          points = Math.round(points * (1 + (streakMultiplier - 1) * 0.2));
+        }
 
-        earnedXp = Math.round(points / 2);
+        // Raw score always accrues; XP only when gamification is enabled.
+        earnedXp = config.enableXp ? Math.round(points / 2) : 0;
         setPointsAwarded(points);
         setScore((s) => s + points);
         setXp((x) => x + earnedXp);
@@ -166,7 +188,8 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
 
       // If Exam mode, advance automatically without revealing answer
       if (config.mode === 'exam') {
-        setTimeout(() => {
+        advanceTimeoutRef.current = setTimeout(() => {
+          advanceTimeoutRef.current = null;
           advanceNext(updatedAnswers, score + points, xp + earnedXp, Math.max(maxStreak, newStreak));
         }, 350);
       }
@@ -178,15 +201,16 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
       streak,
       maxStreak,
       answersList,
-      config.mode,
+      config,
       advanceNext,
       score,
       xp,
     ]
   );
 
+  // Timeout grades whatever is selected; NO_ANSWER only when nothing selected.
   const handleTimeUp = useCallback(() => {
-    evaluateAnswer(null);
+    evaluateAnswer(selectedRef.current);
   }, [evaluateAnswer]);
 
   const handleSubmitAnswer = useCallback(() => {
@@ -200,29 +224,38 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
 
   const handleSelectOption = (opt: string) => {
     if (isAnswerSubmitted) return;
+    selectedRef.current = opt;
     setSelectedOption(opt);
   };
 
-  // Question timer
+  const handleTimeUpRef = useRef(handleTimeUp);
+  handleTimeUpRef.current = handleTimeUp;
+
+  // Per-question countdown. Starts ONCE per question index: latest callbacks
+  // live in refs, so session stopwatch state churn can't restart this interval.
+  // Cleanup also cancels any pending exam auto-advance timeout.
   useEffect(() => {
-    if (config.timerSeconds > 0 && !isAnswerSubmitted) {
-      setTimeLeft(config.timerSeconds);
+    submittedRef.current = false;
+    selectedRef.current = null;
+    setTimeLeft(config.timerSeconds || 0);
+
+    if (config.timerSeconds > 0) {
+      let remaining = config.timerSeconds;
       timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current!);
-            handleTimeUp();
-            return 0;
-          }
-          return prev - 1;
-        });
+        remaining -= 1;
+        setTimeLeft(remaining > 0 ? remaining : 0);
+        if (remaining <= 0) {
+          clearInterval(timerRef.current!);
+          handleTimeUpRef.current();
+        }
       }, 1000);
     }
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (advanceTimeoutRef.current) clearTimeout(advanceTimeoutRef.current);
     };
-  }, [currentIndex, isAnswerSubmitted, config.timerSeconds, handleTimeUp]);
+  }, [currentIndex, config.timerSeconds]);
 
   // Overall session stopwatch
   useEffect(() => {
@@ -247,11 +280,13 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
       if (['A', 'B', 'C', 'D'].includes(key)) {
         const idx = key.charCodeAt(0) - 65;
         if (currentQ?.options[idx]) {
+          selectedRef.current = currentQ.options[idx];
           setSelectedOption(currentQ.options[idx]);
         }
       } else if (['1', '2', '3', '4'].includes(key)) {
         const idx = parseInt(key, 10) - 1;
         if (currentQ?.options[idx]) {
+          selectedRef.current = currentQ.options[idx];
           setSelectedOption(currentQ.options[idx]);
         }
       } else if (e.key === 'Enter' && selectedOption) {
@@ -369,7 +404,7 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
                 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-850 shadow-3d-sm';
 
               if (isAnswerSubmitted && config.mode !== 'exam') {
-                if (option === currentQ.correct_answer || option.includes(currentQ.correct_answer)) {
+                if (matchesCorrectAnswer(option, currentQ.correct_answer)) {
                   cardStyle = 'bg-emerald-950/80 border-emerald-500 text-emerald-100 font-semibold shadow-3d-sm';
                 } else if (isSelected) {
                   cardStyle = 'bg-rose-950/80 border-rose-500 text-rose-200 line-through opacity-80 shadow-3d-sm';
@@ -402,10 +437,10 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
 
                   {isAnswerSubmitted && config.mode !== 'exam' && (
                     <div>
-                      {(option === currentQ.correct_answer || option.includes(currentQ.correct_answer)) && (
+                      {matchesCorrectAnswer(option, currentQ.correct_answer) && (
                         <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                       )}
-                      {isSelected && option !== currentQ.correct_answer && !option.includes(currentQ.correct_answer) && (
+                      {isSelected && !matchesCorrectAnswer(option, currentQ.correct_answer) && (
                         <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
                       )}
                     </div>

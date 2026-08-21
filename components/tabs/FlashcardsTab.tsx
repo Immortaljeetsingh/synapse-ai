@@ -22,8 +22,6 @@ interface FlashcardsTabProps {
   flashcards: FlashcardRecord[];
   onUpdateStatus: (id: string, status: ReviewStatus) => Promise<void>;
   onRegenerate: () => Promise<void>;
-  isStudyModeOpen?: boolean;
-  onToggleStudyMode?: () => void;
 }
 
 export const FlashcardsTab: React.FC<FlashcardsTabProps> = ({
@@ -39,10 +37,26 @@ export const FlashcardsTab: React.FC<FlashcardsTabProps> = ({
   const [isStudyMode, setIsStudyMode] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
-  // Sync deck when flashcards change
+  // Re-sync deck only when the card ID set changes, so shuffling survives
+  // parent array identity changes (e.g. review-status updates).
+  const flashcardIdsKey = flashcards.map((c) => c.id).sort().join('|');
   React.useEffect(() => {
     setDeck(flashcards);
-  }, [flashcards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flashcardIdsKey]);
+
+  // Spacebar flips the card in fullscreen study mode
+  React.useEffect(() => {
+    if (!isStudyMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsFlipped((f) => !f);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isStudyMode]);
 
   const filteredCards = deck.filter((c) => {
     if (selectedTopic !== 'all' && c.topic !== selectedTopic) return false;
