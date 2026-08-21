@@ -1450,6 +1450,20 @@ export async function handleApi(req: Request): Promise<Response> {
       const body = await readBody(req);
       const { provider, model, apiKey, baseUrl } = body;
       const aiProvider = await getAIProvider({ apiKey, provider, model, baseUrl });
+
+      // Offline fallback must report local_mode so the UI shows
+      // "Local Engine (Offline)" instead of a fake "Connected".
+      if (aiProvider.id === 'local') {
+        return json({
+          success: true,
+          status: 'local_mode',
+          connected: false,
+          provider: 'local',
+          model: 'Local Fallback (No API Key)',
+          message: 'No API key configured. Enter your API Key in Settings or set AI_API_KEY.',
+        });
+      }
+
       try {
         const result = await aiProvider.generateText([
           { role: 'user', content: 'Reply with exactly: OK' },
@@ -1457,12 +1471,13 @@ export async function handleApi(req: Request): Promise<Response> {
         return json({
           success: true,
           connected: true,
+          status: 'ok',
           provider: aiProvider.name,
           model: model || 'default',
           response: result.text.slice(0, 100),
         });
       } catch (healthErr: any) {
-        return json({ success: true, connected: false, provider: aiProvider.name, error: healthErr.message });
+        return json({ success: true, connected: false, status: 'error', provider: aiProvider.name, error: healthErr.message });
       }
     }
 
