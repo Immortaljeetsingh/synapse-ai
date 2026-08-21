@@ -432,6 +432,9 @@ async function handleChat(req: Request) {
         replyText.includes("couldn't find sufficient evidence") ||
         replyText.includes("couldn't find this information") ||
         replyText.includes('not available in the uploaded sources') ||
+        replyText.includes('does not contain any information') ||
+        replyText.includes("don't have enough information") ||
+        replyText.includes('no relevant information') ||
         retrieval.chunks.length === 0
       ) {
         groundingType = 'not_in_document';
@@ -540,7 +543,7 @@ async function handleQuizGenerate(req: Request) {
         })\n${c.text}`
     )
     .join('\n\n---\n\n')
-    .slice(0, 16000);
+    .slice(0, 12000);
 
   const seed = Math.floor(Math.random() * 100000);
   const prompt = PROMPTS.GAMIFIED_QUIZ_GENERATION(sourceContext, {
@@ -619,7 +622,7 @@ async function handleArtifactsPost(req: Request) {
   const fullContextText = sampledChunks
     .map((c: any) => `[Doc: ${c.filename || 'Doc'}, Page: ${c.page_number ?? 1}] ${c.text}`)
     .join('\n\n')
-    .slice(0, 20000);
+    .slice(0, 14000);
 
   const primaryDocName = docs[0]?.filename || 'Uploaded Documents';
   const ai = await getAIProvider(CREDENTIAL_HEADERS(req, body));
