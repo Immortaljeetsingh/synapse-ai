@@ -3,7 +3,9 @@
 import { handleApi } from '@/lib/api/handlers';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// 5 minutes — long-form research generation needs it. Requires a Vercel
+// plan/Fluid configuration that allows >60s; the platform clamps otherwise.
+export const maxDuration = 300;
 
 export const GET = handleApi;
 export const POST = handleApi;

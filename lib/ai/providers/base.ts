@@ -15,7 +15,7 @@ export abstract class BaseAIProvider implements AIProvider {
     const jsonOptions: AICompletionOptions = {
       // Cap unbounded completions — oversized max_tokens made slow models
       // generate until the 60s serverless limit killed the request.
-      maxTokens: 8000,
+      maxTokens: 16000,
       ...options,
       responseFormat: 'json',
     };

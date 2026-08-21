@@ -396,10 +396,25 @@ async function runChat(
           ? reportWords.filter((w) => evidenceVocab.has(w)).length / reportWords.length
           : 0;
       if (deepRetrieval.chunks.length === 0 || reportOverlap < 0.1) {
-        replyText =
-          "**I couldn't find sufficient evidence in the uploaded documents to write this research report.**\n\n" +
-          'Deep analysis requires your question to relate to the uploaded sources. Try asking about a topic your documents actually cover.';
-        groundingType = 'not_in_document';
+        // Not document-related — deliver the deep report from general
+        // knowledge instead, clearly labeled.
+        const gk = await ai.generateText(
+          [
+            {
+              role: 'system',
+              content:
+                'You are a Principal Research Analyst. The user\'s request is NOT covered by their uploaded documents, so write the full research report from your own general knowledge.\n' +
+                'Rules:\n' +
+                '- Publication-grade depth: 1500+ words, numbered sections, subsections, Markdown tables, "-" bullets only.\n' +
+                '- Do NOT invent document citations like [file.pdf, p. X].\n' +
+                '- Start with: "> Answered from general AI knowledge — not from your uploaded documents."',
+            },
+            { role: 'user', content: `Write a comprehensive research report on: ${message}` },
+          ],
+          { maxTokens: 32000, onDelta }
+        );
+        replyText = gk.text;
+        groundingType = 'ai_interpretation';
         citations = [];
         specialPayload = null;
         retrievedChunksForResponse = [];
@@ -564,25 +579,39 @@ async function runChat(
 
       const prompt = PROMPTS.RAG_CHAT(retrieval.groundedContextText, historyText, message);
 
-      // Confidence floor: below this the best chunk is noise, so skip the AI
-      // entirely — small models will happily answer off-topic questions from
-      // general knowledge instead of refusing.
+      // Confidence floor: below this the best chunk is noise. Instead of
+      // refusing, answer from GENERAL KNOWLEDGE — clearly labeled as not
+      // coming from the user's documents (ai_interpretation).
       const RETRIEVAL_CONFIDENCE_FLOOR = 0.06;
       const topScore = retrieval.chunks[0]?.score ?? 0;
       if (topScore < RETRIEVAL_CONFIDENCE_FLOOR) {
-        replyText =
-          "**I couldn't find sufficient evidence for this in the uploaded documents.**\n\n" +
-          'Your question may be outside the scope of what you\'ve uploaded. Try rephrasing, or ask about a topic your documents actually cover.';
-        groundingType = 'not_in_document';
-        citations = [];
         retrievedChunksForResponse = [];
+        citations = [];
+        const gk = await ai.generateText(
+          [
+            {
+              role: 'system',
+              content:
+                'You are a knowledgeable study assistant. The user\'s question is NOT covered by their uploaded documents, so answer from your own general knowledge.\n' +
+                'Rules:\n' +
+                '- Be accurate, thorough and well-structured (Markdown headings, "-" bullets, tables where useful).\n' +
+                '- Do NOT invent document citations like [file.pdf, p. X] — nothing here comes from their files.\n' +
+                '- Start with a one-line note: "> Answered from general AI knowledge — not from your uploaded documents."\n' +
+                '- If the question might relate to their documents, offer at the end to dig into the files if they rephrase.',
+            },
+            { role: 'user', content: message },
+          ],
+          { maxTokens: 12000, onDelta }
+        );
+        replyText = gk.text;
+        groundingType = 'ai_interpretation';
       } else {
         const completion = await ai.generateText(
           [
             { role: 'system', content: prompt.system },
             { role: 'user', content: prompt.user },
           ],
-          { maxTokens: 8000, onDelta }
+          { maxTokens: 12000, onDelta }
         );
         replyText = completion.text;
 
@@ -619,16 +648,14 @@ async function runChat(
 
         const looksLikeRefusal =
           (hasHedge && !hasCitationMarker) ||
-          (!hasCitationMarker && topScore < 0.15) ||
           vocabOverlap < 0.1;
 
         if (looksLikeRefusal) {
           // The model ignored grounding instructions and answered from
-          // general knowledge — discard the fabrication entirely.
-          replyText =
-            "**I couldn't find sufficient evidence for this in the uploaded documents.**\n\n" +
-            'The question appears to be outside the scope of what you\'ve uploaded. Try rephrasing, or ask about a topic your documents actually cover.';
-          groundingType = 'not_in_document';
+          // general knowledge — relabel it honestly instead of discarding:
+          // the user still gets the answer, clearly marked as not coming
+          // from their documents.
+          groundingType = 'ai_interpretation';
           citations = [];
         } else if (replyText.includes('AI Interpretation') || replyText.includes('Background Context')) {
           groundingType = 'ai_interpretation';

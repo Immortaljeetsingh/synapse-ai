@@ -93,7 +93,7 @@ export class OpenCodeZenProvider extends BaseAIProvider {
 
     // 8K cap — unbounded completions let slow free models run past the
     // 60s serverless limit, which killed requests silently.
-    const maxTokens = options?.maxTokens ?? 8000;
+    const maxTokens = options?.maxTokens ?? 12000;
 
     const requestBody: any = {
       model: this.model,
