@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, Server, Shield, Cpu, RefreshCw, Key, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { SynapseLogo } from '@/components/brand/SynapseLogo';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
@@ -92,13 +92,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   }, []);
 
+  // Run the load+health sequence ONLY when the modal opens. checkHealth's
+  // identity changes on every keystroke (it reads provider/model state), so
+  // putting it in the effect deps re-ran loadSettings mid-edit and wiped
+  // whatever the user was typing in the Model/URL/Key fields.
+  const loadRef = useRef(loadSettings);
+  const healthRef = useRef(checkHealth);
+  loadRef.current = loadSettings;
+  healthRef.current = checkHealth;
+
   useEffect(() => {
-    if (isOpen) {
-      (async () => {
-        await loadSettings();
-      })().then(() => checkHealth());
-    }
-  }, [isOpen, loadSettings, checkHealth]);
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      await loadRef.current();
+      if (!cancelled) healthRef.current();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

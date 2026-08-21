@@ -31,12 +31,18 @@ export class OpenRouterProvider extends BaseAIProvider {
       content: m.content,
     }));
 
-    const requestBody: any = {
-      model: this.model,
-      messages: formattedMessages,
-      temperature: options?.temperature ?? 0.4,
-      max_tokens: maxTokens,
-    };
+  const requestBody: any = {
+    model: this.model,
+    messages: formattedMessages,
+    temperature: options?.temperature ?? 0.4,
+    max_tokens: maxTokens,
+  };
+
+  // gpt-oss is a reasoning model — at default effort it burns thousands of
+  // thinking tokens before answering, blowing past the 60s function limit.
+  if (this.model.toLowerCase().includes('gpt-oss')) {
+    requestBody.reasoning = { effort: 'low' };
+  }
 
     if (options?.responseFormat === 'json') {
       requestBody.response_format = { type: 'json_object' };
