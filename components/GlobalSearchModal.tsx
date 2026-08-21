@@ -12,22 +12,77 @@ interface SearchResultItem {
   metadata?: any;
 }
 
+interface SearchScope {
+  chunks: any[];
+  notes: any[];
+  flashcards: any[];
+}
+
 interface GlobalSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
-  notebookId: string | null;
+  notebookId?: string | null;
+  scope: SearchScope;
   onSelectResult: (result: SearchResultItem) => void;
+}
+
+const trimSnippet = (text: string) =>
+  text.length > 180 ? text.slice(0, 180) + '...' : text;
+
+// Local filtering — the browser owns chunks/notes/flashcards now, so search
+// never hits the server (each Vercel Lambda has its own /tmp DB).
+function filterScope(query: string, scope: SearchScope): SearchResultItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const hit = (...fields: any[]) => fields.some((f) => typeof f === 'string' && f.toLowerCase().includes(q));
+
+  const chunks = scope.chunks
+    .filter((c) => hit(c.text, c.section_heading))
+    .slice(0, 10)
+    .map((c) => ({
+      type: 'chunk' as const,
+      id: c.id,
+      title: `${c.filename || 'Doc'} (Page ${c.page_number ?? 1})`,
+      subtitle: c.section_heading || 'Document passage',
+      snippet: trimSnippet(String(c.text ?? '')),
+      metadata: { documentId: c.document_id, pageNumber: c.page_number },
+    }));
+
+  const notes = scope.notes
+    .filter((n) => hit(n.title, n.content))
+    .slice(0, 5)
+    .map((n) => ({
+      type: 'note' as const,
+      id: n.id,
+      title: n.title,
+      subtitle: `Note (${n.format_type})`,
+      snippet: trimSnippet(String(n.content ?? '')),
+      metadata: { noteId: n.id },
+    }));
+
+  const flashcards = scope.flashcards
+    .filter((f) => hit(f.question, f.answer, f.topic))
+    .slice(0, 5)
+    .map((f) => ({
+      type: 'flashcard' as const,
+      id: f.id,
+      title: f.question,
+      subtitle: `Flashcard - ${f.topic} (${f.difficulty})`,
+      snippet: trimSnippet(String(f.answer ?? '')),
+      metadata: { flashcardId: f.id },
+    }));
+
+  return [...chunks, ...notes, ...flashcards];
 }
 
 export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   isOpen,
   onClose,
-  notebookId,
+  scope,
   onSelectResult,
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -49,39 +104,12 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (!query.trim() || !notebookId) {
-      setResults([]);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch(
-          `/api/search?notebookId=${notebookId}&q=${encodeURIComponent(query)}`,
-          { signal: controller.signal }
-        );
-        const data = await res.json();
-        if (data.success) {
-          setResults(data.results || []);
-        } else {
-          setResults([]);
-        }
-      } catch (e: any) {
-        if (e?.name !== 'AbortError') console.error('Search error:', e);
-      } finally {
-        setIsLoading(false);
-      }
+    // Debounce keeps typing smooth on large notebooks.
+    const timer = setTimeout(() => {
+      setResults(filterScope(query, scope));
     }, 200);
-
-    // Abort the in-flight request when query changes/unmounts — a slow stale
-    // response used to overwrite results for the newer query.
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [query, notebookId]);
+    return () => clearTimeout(timer);
+  }, [query, scope]);
 
   if (!isOpen) return null;
 
@@ -119,19 +147,15 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
         {/* Results List */}
         <div className="max-h-96 overflow-y-auto p-2 divide-y divide-slate-800/40">
-          {isLoading && (
-            <div className="p-6 text-center text-xs text-slate-500">Searching notebook...</div>
-          )}
-
-          {!isLoading && query.trim() && results.length === 0 && (
-            <div className="p-8 text-center text-xs text-slate-500">
-              No matching passages, notes, or flashcards found for &ldquo;{query}&rdquo;
+          {!query.trim() && (
+            <div className="p-6 text-center text-xs text-slate-500">
+              Type a keyword, concept, or term to search across all uploaded knowledge.
             </div>
           )}
 
-          {!isLoading && !query.trim() && (
-            <div className="p-6 text-center text-xs text-slate-500">
-              Type a keyword, concept, or term to search across all uploaded knowledge.
+          {query.trim() && results.length === 0 && (
+            <div className="p-8 text-center text-xs text-slate-500">
+              No matching passages, notes, or flashcards found for &ldquo;{query}&rdquo;
             </div>
           )}
 

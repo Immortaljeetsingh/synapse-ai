@@ -211,7 +211,17 @@ async function indexParsedDocument(
     filename: rawFilename,
   }));
 
-  return { document, lightweightChunks, chunkCount: processedChunks.length, pageCount: parsed.pageCount };
+  // Echo pages back so the browser can render the drawer statelessly
+  // (each Vercel Lambda has its own /tmp DB — server reads aren't reliable).
+  // ponytail: shared 3M-char budget covers both upload paths here.
+  let charBudget = MAX_TEXT_CHARS;
+  const pages = parsed.pages.map((p) => {
+    const text = charBudget > 0 ? p.text.slice(0, charBudget) : '';
+    charBudget -= text.length;
+    return { pageNumber: p.pageNumber, text };
+  });
+
+  return { document, lightweightChunks, chunkCount: processedChunks.length, pageCount: parsed.pageCount, pages };
 }
 
 async function indexDocumentFile(
@@ -627,7 +637,17 @@ async function handleArtifactsPost(req: Request) {
 
   const { getChunksByNotebook, getDocumentsByNotebook, insertFlashcards, deleteFlashcardsByNotebook } =
     await import('@/lib/db/queries');
-  const chunks = await getChunksByNotebook(notebookId);
+  // Client-provided chunks win — the browser is the source of truth on
+  // stateless serverless (each Lambda instance has its own /tmp DB).
+  const chunks: any[] =
+    Array.isArray(body.chunks) && body.chunks.length > 0
+      ? body.chunks.map((c: any) => ({
+          ...c,
+          filename: c.filename || 'Doc',
+          page_number: c.page_number ?? 1,
+          text: String(c.text ?? ''),
+        }))
+      : await getChunksByNotebook(notebookId);
   const docs = await getDocumentsByNotebook(notebookId);
 
   if (chunks.length === 0) {
@@ -766,6 +786,18 @@ async function handleNotesGenerate(req: Request) {
   const { getChunksByNotebook, getDocumentsByNotebook } = await import('@/lib/db/queries');
   const ai = await getAIProvider(CREDENTIAL_HEADERS(req, body));
 
+  // Client-provided chunks win — stateless serverless can't rely on this
+  // Lambda instance's /tmp DB holding the notebook's rows.
+  const clientChunks: any[] | null =
+    Array.isArray(body.chunks) && body.chunks.length > 0
+      ? body.chunks.map((c: any) => ({
+          ...c,
+          filename: c.filename || 'Doc',
+          page_number: c.page_number ?? 1,
+          text: String(c.text ?? ''),
+        }))
+      : null;
+
   async function persistGeneratedNotes(notesPrompt: any, textOverride?: string) {
     const res = await ai.generateStructuredJson<{
       notes: Array<{ title: string; format_type?: string; content?: string; points?: string[] }>;
@@ -805,12 +837,16 @@ async function handleNotesGenerate(req: Request) {
   if (sourceDocument) {
     const docs = await getDocumentsByNotebook(notebookId);
     const targetDoc = docs.find((d) => d.id === sourceDocument || d.filename === sourceDocument);
-    if (!targetDoc) {
+    if (!targetDoc && !clientChunks) {
       return json({ success: false, error: 'Source document not found in this notebook.' }, 404);
     }
 
-    const chunks = await getChunksByNotebook(notebookId);
-    const docChunks = chunks.filter((c) => c.document_id === targetDoc.id);
+    const chunks = clientChunks ?? (await getChunksByNotebook(notebookId));
+    // Client chunks may carry no server document_id — fall back to filename match.
+    const docName = targetDoc?.filename || String(sourceDocument);
+    const docChunks = chunks.filter(
+      (c) => (targetDoc && c.document_id === targetDoc.id) || c.filename === docName
+    );
     const combinedText = docChunks.map((c) => c.text).join('\n\n');
 
     if (!combinedText || combinedText.trim().length === 0) {
@@ -819,13 +855,13 @@ async function handleNotesGenerate(req: Request) {
 
     const targetChars = 60000;
     const sampledText = combinedText.slice(0, targetChars);
-    const notesPrompt = PROMPTS.DOCUMENT_DEEP_NOTES_AND_AUDIT(targetDoc.filename, sampledText);
-    const createdNotes = await persistGeneratedNotes(notesPrompt, targetDoc.filename);
+    const notesPrompt = PROMPTS.DOCUMENT_DEEP_NOTES_AND_AUDIT(docName, sampledText);
+    const createdNotes = await persistGeneratedNotes(notesPrompt, docName);
 
     const sourceReferences = [
       {
-        document_id: targetDoc.id,
-        document_name: targetDoc.filename,
+        document_id: targetDoc?.id || null,
+        document_name: docName,
         pages: Array.from(new Set(docChunks.map((c) => c.page_number))).slice(0, 10),
       },
     ];
@@ -834,7 +870,7 @@ async function handleNotesGenerate(req: Request) {
       q.createNote({
         id: `note_deep_${Date.now()}`,
         notebook_id: notebookId,
-        title: `Deep Notes & Audit: ${targetDoc.filename}`,
+        title: `Deep Notes & Audit: ${docName}`,
         content: JSON.stringify(sourceReferences),
         format_type: format || 'cornell',
         is_pinned: 0,
@@ -845,10 +881,10 @@ async function handleNotesGenerate(req: Request) {
     return json({ success: true, note, notes: createdNotes.length > 0 ? createdNotes : [note] });
   }
 
-  const chunks = await getChunksByNotebook(notebookId);
+  const chunks = clientChunks ?? (await getChunksByNotebook(notebookId));
   const docs = await getDocumentsByNotebook(notebookId);
   const combinedText = chunks.map((c) => c.text).join('\n\n');
-  const docName = docs[0]?.filename || 'Uploaded Documents';
+  const docName = docs[0]?.filename || chunks[0]?.filename || 'Uploaded Documents';
 
   if (!combinedText || combinedText.trim().length === 0) {
     return json({ success: false, error: 'No document text found in this notebook. Please upload a document first.' }, 400);
@@ -868,6 +904,22 @@ async function handleNotesGenerate(req: Request) {
 
   return json({ success: true, notes: createdNotes });
 }
+
+// The browser is the source of truth for notebooks. When a request lands on
+// a Lambda instance that never saw this notebook (isolated /tmp DB), create a
+// stub row instead of failing — the client holds the real title/metadata.
+async function ensureNotebookRow(notebookId: string): Promise<boolean> {
+  if (!notebookId) return false;
+  const existing = await getNotebookById(notebookId);
+  if (existing) return true;
+  try {
+    await createNotebook({ id: notebookId, title: 'Notebook', description: '' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 // ==================== MAIN DISPATCHER ====================
 
@@ -955,8 +1007,9 @@ export async function handleApi(req: Request): Promise<Response> {
           return json({ success: false, error: 'notebookId and file are required' }, 400);
         }
 
-        const notebook = await getNotebookById(notebookId);
-        if (!notebook) return json({ success: false, error: 'Notebook not found' }, 404);
+        // Upsert — never 404 just because this Lambda instance hasn't seen
+        // the notebook (the browser owns notebook state).
+        await ensureNotebookRow(notebookId);
 
         if (file.size > MAX_FILE_SIZE) {
           return json(
@@ -998,7 +1051,7 @@ export async function handleApi(req: Request): Promise<Response> {
 
         return json({
           success: true,
-          document: { ...result.document, chunks: result.lightweightChunks },
+          document: { ...result.document, chunks: result.lightweightChunks, pages: result.pages },
           chunkCount: result.chunkCount,
           pageCount: result.pageCount,
         });
@@ -1014,8 +1067,8 @@ export async function handleApi(req: Request): Promise<Response> {
         return json({ success: false, error: 'notebookId, filename, and a non-empty pages array are required' }, 400);
       }
 
-      const notebook = await getNotebookById(notebookId);
-      if (!notebook) return json({ success: false, error: 'Notebook not found' }, 404);
+      // Upsert — never 404 on a cold instance (browser owns notebook state).
+      await ensureNotebookRow(notebookId);
 
       const cleanPages = pages.map((p: any, i: number) => ({
         pageNumber: Number(p?.pageNumber) || i + 1,
@@ -1056,7 +1109,7 @@ export async function handleApi(req: Request): Promise<Response> {
 
       return json({
         success: true,
-        document: { ...result.document, chunks: result.lightweightChunks },
+        document: { ...result.document, chunks: result.lightweightChunks, pages: result.pages },
         chunkCount: result.chunkCount,
         pageCount: result.pageCount,
       });

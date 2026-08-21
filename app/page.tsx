@@ -40,13 +40,75 @@ import {
   ReviewStatus,
   NoteFormatType,
 } from '@/lib/types';
+import { idbSet, idbGet, idbDel } from '@/lib/client-db';
+
+// ---- Local-first storage (browser is source of truth; Vercel lambdas have
+// isolated /tmp DBs so server-persisted state cannot be relied on) ----
+type DocPage = { pageNumber: number; text: string };
+type LightweightChunk = {
+  id: string;
+  document_id: string;
+  notebook_id?: string;
+  chunk_index: number;
+  page_number: number;
+  section_heading?: string | null;
+  text: string;
+  filename?: string;
+};
+type LocalDocument = DocumentRecord & { chunks?: LightweightChunk[]; pages?: DocPage[] };
+
+interface NotebookBundle {
+  documents: LocalDocument[];
+  messages: ChatMessage[];
+  notes: NoteRecord[];
+  flashcards: FlashcardRecord[];
+  attempts: QuizAttemptRecord[];
+  artifacts: Record<string, any>;
+}
+
+const NB_KEY = 'synapse_notebooks';
+const ACTIVE_KEY = 'synapse_active_nb';
+const nbBundleKey = (id: string) => `synapse_nb_${id}`;
+const emptyBundle = (): NotebookBundle => ({
+  documents: [],
+  messages: [],
+  notes: [],
+  flashcards: [],
+  attempts: [],
+  artifacts: {},
+});
+
+// Topic performance computed client-side from stored attempts:
+// accuracy <70% with >=2 answers = weak topic.
+function computeTopicPerformance(attempts: QuizAttemptRecord[]) {
+  const stats = new Map<string, { total: number; correct: number }>();
+  for (const att of attempts) {
+    for (const ans of att.answers || []) {
+      const topic = ans.topic || 'General';
+      const s = stats.get(topic) || { total: 0, correct: 0 };
+      s.total++;
+      if (ans.is_correct) s.correct++;
+      stats.set(topic, s);
+    }
+  }
+  const performance: TopicPerformanceRecord[] = [...stats.entries()].map(([topic, s]) => ({
+    topic,
+    total_answered: s.total,
+    total_correct: s.correct,
+    accuracy_pct: Math.round((s.correct / s.total) * 100),
+  }));
+  const weakTopics = performance
+    .filter((p) => p.accuracy_pct < 70 && p.total_answered >= 2)
+    .map((p) => p.topic);
+  return { performance, weakTopics };
+}
 
 export default function ChatStudioWorkspace() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null);
 
   // Active Notebook State
-  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [documents, setDocuments] = useState<LocalDocument[]>([]);
   const [artifacts, setArtifacts] = useState<Record<string, any>>({});
   const [notes, setNotes] = useState<NoteRecord[]>([]);
   const [flashcards, setFlashcards] = useState<FlashcardRecord[]>([]);
@@ -62,6 +124,19 @@ export default function ChatStudioWorkspace() {
   const [activeCompanionTab, setActiveCompanionTab] = useState<CompanionTab>('overview');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  // Cmd/Ctrl+K toggles global search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   // Document Drawer State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -112,71 +187,111 @@ export default function ChatStudioWorkspace() {
     return headers;
   }, []);
 
+  // Read-modify-write the notebook's persisted bundle; returns the new bundle
+  // so callers can mirror it into React state (always reads fresh from idb).
+  const mutateBundle = useCallback(
+    async (nbId: string, mutate: (b: NotebookBundle) => Partial<NotebookBundle>) => {
+      const prev = (await idbGet<NotebookBundle>(nbBundleKey(nbId))) || emptyBundle();
+      const next = { ...prev, ...mutate(prev) };
+      await idbSet(nbBundleKey(nbId), next);
+      return next;
+    },
+    []
+  );
+
   const handleCreateNotebook = useCallback(async (title: string, description: string) => {
+    const now = new Date().toISOString();
+    const nb: Notebook = {
+      id: `nb_${Date.now()}_cl`,
+      title: title || 'New Chat',
+      description,
+      created_at: now,
+      updated_at: now,
+    };
+    const list = (await idbGet<Notebook[]>(NB_KEY)) || [];
+    const next = [nb, ...list];
+    await idbSet(NB_KEY, next);
+    setNotebooks(next);
+    setActiveNotebookId(nb.id);
+
+    // Fire-and-forget server sync. The server mints its own id, so adopt it —
+    // uploads need a server-side notebook row or they 404 "Notebook not found".
     try {
       const res = await fetch('/api/notebooks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title || 'New Chat', description }),
+        body: JSON.stringify({ title: nb.title, description }),
       });
       const data = await res.json();
-      if (data.success) {
-        setNotebooks((prev) => [data.notebook, ...prev]);
-        setActiveNotebookId(data.notebook.id);
+      const serverId = data?.notebook?.id;
+      if (data.success && serverId && serverId !== nb.id) {
+        // ponytail: last-writer-wins on the registry during concurrent creates;
+        // single-user UI makes that window negligible.
+        const renamed = (((await idbGet<Notebook[]>(NB_KEY)) as Notebook[]) || []).map((n) =>
+          n.id === nb.id ? { ...n, id: serverId } : n
+        );
+        await idbSet(NB_KEY, renamed);
+        const bundle = await idbGet<NotebookBundle>(nbBundleKey(nb.id));
+        if (bundle) {
+          await idbSet(nbBundleKey(serverId), bundle);
+          await idbDel(nbBundleKey(nb.id));
+        }
+        setNotebooks(renamed);
+        setActiveNotebookId((current) => (current === nb.id ? serverId : current));
       }
     } catch (e) {
-      console.error('Error creating notebook:', e);
+      console.error('Error syncing notebook to server:', e);
     }
   }, []);
 
   const fetchNotebooks = useCallback(async () => {
+    let local = await idbGet<Notebook[]>(NB_KEY);
+    if (!local || local.length === 0) {
+      const now = new Date().toISOString();
+      local = [
+        {
+          id: `nb_${Date.now()}_cl`,
+          title: 'Research & Learning Studio',
+          description: '',
+          created_at: now,
+          updated_at: now,
+        },
+      ];
+      await idbSet(NB_KEY, local);
+    }
+    setNotebooks(local);
+    const savedActive = await idbGet<string>(ACTIVE_KEY);
+    setActiveNotebookId(
+      savedActive && local.some((n) => n.id === savedActive) ? savedActive : local[0].id
+    );
+
+    // Best-effort merge of any server notebooks not present locally (local wins).
     try {
       const res = await fetch('/api/notebooks');
       const data = await res.json();
-      if (data.success && data.notebooks?.length > 0) {
-        setNotebooks(data.notebooks);
-        if (!activeNotebookId) {
-          setActiveNotebookId(data.notebooks[0].id);
-        }
-      } else if (data.notebooks?.length === 0) {
-        handleCreateNotebook('Research & Learning Studio', '');
+      if (data.success && Array.isArray(data.notebooks)) {
+        const byId = new Map(local.map((n) => [n.id, n]));
+        for (const nb of data.notebooks) if (!byId.has(nb.id)) byId.set(nb.id, nb);
+        const merged = [...byId.values()];
+        setNotebooks(merged);
+        await idbSet(NB_KEY, merged);
       }
-    } catch (e) {
-      console.error('Error loading notebooks:', e);
+    } catch {
+      /* offline or cold lambda — local state already good */
     }
-  }, [activeNotebookId, handleCreateNotebook]);
+  }, []);
 
   const loadNotebook = useCallback(async (id: string) => {
-    try {
-      const [nbRes, attRes, weakRes] = await Promise.all([
-        fetch(`/api/notebooks/${id}`),
-        fetch(`/api/quiz/attempt?notebookId=${id}`),
-        fetch(`/api/quiz/weak-areas?notebookId=${id}`),
-      ]);
-
-      const [nbData, attData, weakData] = await Promise.all([
-        nbRes.json(),
-        attRes.json(),
-        weakRes.json(),
-      ]);
-
-      if (nbData.success) {
-        setDocuments(nbData.documents || []);
-        setArtifacts(nbData.artifacts || {});
-        setNotes(nbData.notes || []);
-        setFlashcards(nbData.flashcards || []);
-        setChatMessages(nbData.chat?.messages || []);
-      }
-      if (attData.success) {
-        setQuizAttempts(attData.attempts || []);
-      }
-      if (weakData.success) {
-        setTopicPerformance(weakData.performance || []);
-        setWeakTopics(weakData.weakTopics || []);
-      }
-    } catch (e) {
-      console.error('Error loading notebook details:', e);
-    }
+    const b = (await idbGet<NotebookBundle>(nbBundleKey(id))) || emptyBundle();
+    setDocuments(b.documents);
+    setArtifacts(b.artifacts);
+    setNotes(b.notes);
+    setFlashcards(b.flashcards);
+    setChatMessages(b.messages);
+    setQuizAttempts(b.attempts);
+    const { performance, weakTopics } = computeTopicPerformance(b.attempts);
+    setTopicPerformance(performance);
+    setWeakTopics(weakTopics);
   }, []);
 
   // 1. Initial Load
@@ -190,21 +305,22 @@ export default function ChatStudioWorkspace() {
   // 2. Load Notebook Details on change
   useEffect(() => {
     if (activeNotebookId) {
+      idbSet(ACTIVE_KEY, activeNotebookId);
       loadNotebook(activeNotebookId);
     }
   }, [activeNotebookId, loadNotebook]);
 
   const handleDeleteNotebook = async (id: string) => {
-    try {
-      await fetch(`/api/notebooks/${id}`, { method: 'DELETE' });
-      setNotebooks((prev) => prev.filter((n) => n.id !== id));
-      if (activeNotebookId === id) {
-        const remaining = notebooks.filter((n) => n.id !== id);
-        setActiveNotebookId(remaining[0]?.id || null);
-      }
-    } catch (e) {
-      console.error('Error deleting notebook:', e);
+    const remaining = notebooks.filter((n) => n.id !== id);
+    setNotebooks(remaining);
+    await idbSet(NB_KEY, remaining);
+    await idbDel(nbBundleKey(id));
+    if (activeNotebookId === id) {
+      setActiveNotebookId(remaining[0]?.id || null);
     }
+    fetch(`/api/notebooks/${id}`, { method: 'DELETE' }).catch((e) =>
+      console.error('Error deleting notebook on server:', e)
+    );
   };
 
   // Upload Handlers
@@ -220,7 +336,7 @@ export default function ChatStudioWorkspace() {
     const res = await fetch('/api/documents', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
-    return data.document as DocumentRecord;
+    return data.document as LocalDocument;
   };
 
   const uploadViaTextEndpoint = async (filename: string, pages: { pageNumber: number; text: string }[]) => {
@@ -231,7 +347,7 @@ export default function ChatStudioWorkspace() {
     });
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
-    return data.document as DocumentRecord;
+    return data.document as LocalDocument;
   };
 
   // Mirrors lib/parsers/pdf.ts pager logic: newline when y moves >5, space otherwise.
@@ -291,8 +407,12 @@ export default function ChatStudioWorkspace() {
             newDoc = await uploadMultipart(file);
           }
 
-          setDocuments((prev) => [newDoc, ...prev]);
-          loadNotebook(activeNotebookId);
+          // Merge (document now carries .chunks + .pages from the server) and
+          // persist BEFORE reporting success so the doc survives any lambda.
+          setDocuments((prev) => [newDoc, ...prev.filter((d) => d.id !== newDoc.id)]);
+          await mutateBundle(activeNotebookId, (b) => ({
+            documents: [newDoc, ...b.documents.filter((d) => d.id !== newDoc.id)],
+          }));
         } catch (uploadErr: any) {
           failures++;
           console.error(`Upload failed for ${file.name}:`, uploadErr);
@@ -310,25 +430,27 @@ export default function ChatStudioWorkspace() {
   // Chat Message Handler with Auto Companion Tab Switching
   const handleSendMessage = async (msg: string) => {
     if (!activeNotebookId) return;
+    const nbId = activeNotebookId;
     setIsChatLoading(true);
 
     const tempUserMsg: ChatMessage = {
       id: `temp_${Date.now()}`,
       session_id: 'session',
-      notebook_id: activeNotebookId,
+      notebook_id: nbId,
       role: 'user',
       content: msg,
       grounding_type: 'direct_source',
       created_at: new Date().toISOString(),
     };
     setChatMessages((prev) => [...prev, tempUserMsg]);
+    await mutateBundle(nbId, (b) => ({ messages: [...b.messages, tempUserMsg] }));
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: getAIHeaders(),
         body: JSON.stringify({
-          notebookId: activeNotebookId,
+          notebookId: nbId,
           message: msg,
           documents: documents,
         }),
@@ -338,10 +460,14 @@ export default function ChatStudioWorkspace() {
       if (data.success && data.message) {
         // Keep the user's message visible — only append the assistant response
         setChatMessages((prev) => [...prev, data.message]);
+        await mutateBundle(nbId, (b) => ({ messages: [...b.messages, data.message] }));
 
         // If intent was flashcards, refresh and open Flashcards Companion tab
         if (data.specialPayload?.type === 'flashcards' && data.specialPayload.cards) {
           setFlashcards((prev) => [...data.specialPayload.cards, ...prev]);
+          await mutateBundle(nbId, (b) => ({
+            flashcards: [...data.specialPayload.cards, ...b.flashcards],
+          }));
           setActiveCompanionTab('flashcards');
           setIsCompanionOpen(true);
         }
@@ -349,6 +475,9 @@ export default function ChatStudioWorkspace() {
         // If intent was notes, refresh and open Notes Companion tab
         if (data.specialPayload?.type === 'note_created' && data.specialPayload.note) {
           setNotes((prev) => [data.specialPayload.note, ...prev]);
+          await mutateBundle(nbId, (b) => ({
+            notes: [data.specialPayload.note, ...b.notes],
+          }));
           setActiveCompanionTab('notes');
           setIsCompanionOpen(true);
         }
@@ -399,22 +528,28 @@ export default function ChatStudioWorkspace() {
     format_type: NoteFormatType;
   }) => {
     if (!activeNotebookId) return;
-    try {
-      const res = await fetch('/api/notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          notebookId: activeNotebookId,
-          ...noteData,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setNotes((prev) => [data.note, ...prev]);
-      }
-    } catch (err) {
-      console.error('Error creating note:', err);
-    }
+    const now = new Date().toISOString();
+    const note: NoteRecord = {
+      id: `note_${Date.now()}_cl`,
+      notebook_id: activeNotebookId,
+      title: noteData.title,
+      content: noteData.content,
+      format_type: noteData.format_type,
+      is_pinned: 0,
+      created_at: now,
+      updated_at: now,
+    };
+    setNotes((prev) => [note, ...prev]);
+    await mutateBundle(activeNotebookId, (b) => ({ notes: [note, ...b.notes] }));
+    // Best-effort server sync; the local copy is authoritative.
+    fetch('/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        notebookId: activeNotebookId,
+        ...noteData,
+      }),
+    }).catch((err) => console.error('Error syncing note to server:', err));
   };
 
   // Debounce timers for note autosave — one in-flight write per keystroke
@@ -422,8 +557,12 @@ export default function ChatStudioWorkspace() {
   const noteSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const handleUpdateNote = async (id: string, updates: Partial<NoteRecord>) => {
+    if (!activeNotebookId) return;
     // Optimistic local update first so typing stays instant
     setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...updates } : n)));
+    await mutateBundle(activeNotebookId, (b) => ({
+      notes: b.notes.map((n) => (n.id === id ? { ...n, ...updates } : n)),
+    }));
     if (noteSaveTimers.current[id]) clearTimeout(noteSaveTimers.current[id]);
     noteSaveTimers.current[id] = setTimeout(async () => {
       try {
@@ -439,28 +578,32 @@ export default function ChatStudioWorkspace() {
   };
 
   const handleDeleteNote = async (id: string) => {
-    try {
-      await fetch(`/api/notes/${id}`, { method: 'DELETE' });
-      setNotes((prev) => prev.filter((n) => n.id !== id));
-    } catch (e) {
-      console.error('Error deleting note:', e);
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+    if (activeNotebookId) {
+      await mutateBundle(activeNotebookId, (b) => ({
+        notes: b.notes.filter((n) => n.id !== id),
+      }));
     }
+    fetch(`/api/notes/${id}`, { method: 'DELETE' }).catch((e) =>
+      console.error('Error deleting note:', e)
+    );
   };
 
   // Flashcard Status
   const handleUpdateFlashcardStatus = async (id: string, status: ReviewStatus) => {
-    try {
-      await fetch(`/api/flashcards/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ review_status: status }),
-      });
-      setFlashcards((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, review_status: status } : c))
-      );
-    } catch (err) {
-      console.error('Error updating flashcard status:', err);
+    setFlashcards((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, review_status: status } : c))
+    );
+    if (activeNotebookId) {
+      await mutateBundle(activeNotebookId, (b) => ({
+        flashcards: b.flashcards.map((c) => (c.id === id ? { ...c, review_status: status } : c)),
+      }));
     }
+    fetch(`/api/flashcards/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review_status: status }),
+    }).catch((err) => console.error('Error updating flashcard status:', err));
   };
 
   // Artifact Regeneration
@@ -473,11 +616,16 @@ export default function ChatStudioWorkspace() {
         body: JSON.stringify({
           notebookId: activeNotebookId,
           artifactType,
+          // Stateless lambdas can't read the /tmp DB — send the source text.
+          chunks: documents.flatMap((d) => d.chunks || []),
         }),
       });
       const data = await res.json();
       if (data.success) {
-        loadNotebook(activeNotebookId);
+        setArtifacts((prev) => ({ ...prev, [artifactType]: data.artifact }));
+        await mutateBundle(activeNotebookId, (b) => ({
+          artifacts: { ...b.artifacts, [artifactType]: data.artifact },
+        }));
       }
     } catch (err) {
       console.error('Error regenerating artifact:', err);
@@ -499,32 +647,69 @@ export default function ChatStudioWorkspace() {
     setQuizResults(results);
     setIsQuizActive(false);
 
-    // Attempts reference a real quizzes row (NOT NULL + FK). If we somehow
-    // have no quiz id, there is nothing valid to persist.
-    if (!activeQuizId) {
-      loadNotebook(activeNotebookId);
-      return;
-    }
+    // Tag answers with their question topics so weak-area tracking works
+    // fully client-side (the game engine doesn't set topic itself).
+    const topicByQuestion = new Map(quizQuestions.map((q) => [q.id, q.topic]));
+    const enrichedAnswers = (results.answers || []).map((a) => ({
+      ...a,
+      topic: a.topic || topicByQuestion.get(a.question_id) || 'General',
+    }));
 
-    try {
-      await fetch('/api/quiz/attempt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          quizId: activeQuizId,
-          notebookId: activeNotebookId,
-          title: quizTitle,
-          ...results,
-        }),
-      });
-      loadNotebook(activeNotebookId);
-    } catch (e) {
-      console.error('Error saving quiz attempt:', e);
-    }
+    const attempt: QuizAttemptRecord = {
+      id: `att_${Date.now()}_cl`,
+      // Server quiz rows can vanish between Lambda instances — a local id
+      // keeps history intact when there is nothing to reference.
+      quiz_id: activeQuizId || `quiz_local_${Date.now()}`,
+      notebook_id: activeNotebookId,
+      title: quizTitle,
+      score: results.score,
+      total_questions: results.totalQuestions,
+      correct_count: results.correctCount,
+      accuracy_pct: results.accuracyPct,
+      xp_earned: results.xpEarned,
+      max_streak: results.maxStreak,
+      time_spent_seconds: results.timeSpentSeconds,
+      created_at: new Date().toISOString(),
+      answers: enrichedAnswers,
+    };
+
+    const next = await mutateBundle(activeNotebookId, (b) => ({
+      attempts: [attempt, ...b.attempts],
+    }));
+    setQuizAttempts(next.attempts);
+    const { performance, weakTopics } = computeTopicPerformance(next.attempts);
+    setTopicPerformance(performance);
+    setWeakTopics(weakTopics);
+
+    // Best-effort server sync — history works without it.
+    fetch('/api/quiz/attempt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quizId: attempt.quiz_id,
+        notebookId: activeNotebookId,
+        title: quizTitle,
+        ...results,
+        answers: enrichedAnswers,
+      }),
+    }).catch((e) => console.error('Error saving quiz attempt:', e));
   };
 
   const handleStartQuizConfig = async (config: QuizConfig) => {
     if (!activeNotebookId) return;
+    // Scoped chunks make generation work on ANY server instance (stateless).
+    const scopedDocs = config.documentId
+      ? documents.filter((d) => d.id === config.documentId)
+      : documents;
+    let chunks = scopedDocs.flatMap((d) => d.chunks || []);
+    if (config.topic) {
+      const t = config.topic.toLowerCase();
+      chunks = chunks.filter(
+        (c) =>
+          (c.section_heading || '').toLowerCase().includes(t) ||
+          c.text.toLowerCase().includes(t)
+      );
+    }
     try {
       const res = await fetch('/api/quiz/generate', {
         method: 'POST',
@@ -532,6 +717,7 @@ export default function ChatStudioWorkspace() {
         body: JSON.stringify({
           notebookId: activeNotebookId,
           documents: documents,
+          chunks,
           ...config,
         }),
       });
@@ -556,12 +742,18 @@ export default function ChatStudioWorkspace() {
       const res = await fetch('/api/notes/generate', {
         method: 'POST',
         headers: getAIHeaders(),
-        body: JSON.stringify({ notebookId: activeNotebookId }),
+        body: JSON.stringify({
+          notebookId: activeNotebookId,
+          // Stateless lambdas can't read the /tmp DB — send the source text.
+          chunks: documents.flatMap((d) => d.chunks || []),
+        }),
       });
       const data = await res.json();
       if (data.success && data.notes) {
         setNotes((prev) => [...data.notes, ...prev]);
-        loadNotebook(activeNotebookId);
+        await mutateBundle(activeNotebookId, (b) => ({
+          notes: [...data.notes, ...b.notes],
+        }));
       }
     } catch (e) {
       console.error('Error generating deep notes:', e);
@@ -702,8 +894,13 @@ export default function ChatStudioWorkspace() {
           if (activeNotebookId) loadNotebook(activeNotebookId);
         }}
         onDeleteDocument={async (id) => {
-          await fetch(`/api/documents/${id}`, { method: 'DELETE' });
           setDocuments((prev) => prev.filter((d) => d.id !== id));
+          if (activeNotebookId) {
+            await mutateBundle(activeNotebookId, (b) => ({
+              documents: b.documents.filter((d) => d.id !== id),
+            }));
+          }
+          fetch(`/api/documents/${id}`, { method: 'DELETE' }).catch(() => {});
         }}
         onOpenViewer={(doc) => {
           setDrawerDoc(doc);
@@ -712,6 +909,37 @@ export default function ChatStudioWorkspace() {
           setIsDrawerOpen(true);
         }}
         isUploading={isUploading}
+      />
+
+      {/* Global Knowledge Search (Cmd/Ctrl+K) — runs on local scope */}
+      <GlobalSearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        notebookId={activeNotebookId}
+        scope={{
+          chunks: documents.flatMap((d) => d.chunks || []),
+          notes,
+          flashcards,
+        }}
+        onSelectResult={(r) => {
+          setIsSearchOpen(false);
+          if (r.type === 'chunk') {
+            const doc =
+              documents.find((d) => d.id === r.metadata?.documentId) || documents[0];
+            if (doc) {
+              setDrawerDoc(doc);
+              setDrawerTargetPage(r.metadata?.pageNumber || 1);
+              setDrawerExcerpt(r.snippet || '');
+              setIsDrawerOpen(true);
+            }
+          } else if (r.type === 'note') {
+            setActiveCompanionTab('notes');
+            setIsCompanionOpen(true);
+          } else {
+            setActiveCompanionTab('flashcards');
+            setIsCompanionOpen(true);
+          }
+        }}
       />
 
       {/* Sliding Document & Citation Drawer */}

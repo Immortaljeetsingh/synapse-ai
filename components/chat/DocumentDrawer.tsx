@@ -1,22 +1,26 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   FileText,
   ChevronLeft,
   ChevronRight,
   Search,
-  Download,
-  AlertCircle,
-  ExternalLink,
 } from 'lucide-react';
 import { DocumentRecord } from '@/lib/types';
+
+// Docs may arrive enriched with browser-held content (pages from the upload
+// response, or chunks) — server reads aren't reliable across Lambda instances.
+interface DrawerDocument extends DocumentRecord {
+  pages?: { pageNumber: number; text: string }[];
+  chunks?: any[];
+}
 
 interface DocumentDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  document: DocumentRecord | null;
+  document: DrawerDocument | null;
   targetPage: number;
   highlightExcerpt: string;
 }
@@ -29,39 +33,39 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
   highlightExcerpt = '',
 }) => {
   const [currentPage, setCurrentPage] = useState(targetPage);
-  const [pagesContent, setPagesContent] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     setCurrentPage(targetPage || 1);
   }, [targetPage]);
 
-  useEffect(() => {
-    if (document?.id && isOpen) {
-      loadContent(document.id);
+  // Render purely from the doc prop: prefer explicit pages, else group
+  // chunks by page number. No server fetch — /tmp DBs differ per instance.
+  const pagesContent = useMemo(() => {
+    if (!document) return [];
+    if (Array.isArray(document.pages) && document.pages.length > 0) {
+      return [...document.pages]
+        .sort((a, b) => (Number(a.pageNumber) || 0) - (Number(b.pageNumber) || 0))
+        .map((p) => String(p.text ?? ''));
     }
-  }, [document?.id, isOpen]);
-
-  const loadContent = async (docId: string) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/documents/${docId}/content`);
-      const data = await res.json();
-      if (data.success && data.pages) {
-        setPagesContent(data.pages.map((p: any) => p.text));
+    if (Array.isArray(document.chunks) && document.chunks.length > 0) {
+      const byPage = new Map<number, string[]>();
+      for (const c of document.chunks) {
+        const pn = Number(c.page_number) || 1;
+        const list = byPage.get(pn);
+        if (list) list.push(String(c.text ?? ''));
+        else byPage.set(pn, [String(c.text ?? '')]);
       }
-    } catch (e) {
-      console.error('Error loading drawer document content:', e);
-    } finally {
-      setIsLoading(false);
+      return [...byPage.entries()].sort((a, b) => a[0] - b[0]).map(([, texts]) => texts.join('\n\n'));
     }
-  };
+    return [];
+  }, [document]);
 
   if (!isOpen || !document) return null;
 
   const totalPages = pagesContent.length || document.page_count || 1;
-  const currentText = pagesContent[currentPage - 1] || 'No extracted text available for this page.';
+  const currentText =
+    pagesContent[currentPage - 1] || 'No extracted text available for this page.';
 
   // Highlight search term or citation excerpt in text
   const renderHighlightedText = (text: string) => {
@@ -142,13 +146,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
 
       {/* Page Content Display */}
       <div className="flex-1 overflow-y-auto p-6 bg-neutral-950 text-neutral-300 text-xs leading-relaxed font-sans whitespace-pre-wrap select-text">
-        {isLoading ? (
-          <div className="text-center py-12 text-neutral-600 animate-pulse">
-            Loading document content...
-          </div>
-        ) : (
-          renderHighlightedText(currentText)
-        )}
+        {renderHighlightedText(currentText)}
       </div>
 
       {/* Footer Info */}
