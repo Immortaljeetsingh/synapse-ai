@@ -269,11 +269,54 @@ async function indexDocumentFile(
 
 async function handleChat(req: Request) {
   const body = await readBody(req);
-  const { notebookId, message, documentFilterId } = body;
+  const { notebookId, message } = body;
 
   if (!notebookId || !message) {
     return json({ success: false, error: 'notebookId and message are required' }, 400);
   }
+
+  // Streaming mode: SSE with live deltas, then a final done event carrying
+  // the same payload shape as the non-streaming response.
+  if (body.stream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        let closed = false;
+        const send = (obj: any) => {
+          if (!closed) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+          }
+        };
+        try {
+          const result = await runChat(req, body, (delta: string) => send({ type: 'delta', delta }));
+          send({ type: 'done', ...result });
+        } catch (err: any) {
+          send({ type: 'error', error: err?.message || 'Chat failed' });
+        } finally {
+          closed = true;
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+      },
+    });
+  }
+
+  const result = await runChat(req, body);
+  return json(result);
+}
+
+async function runChat(
+  req: Request,
+  body: any,
+  onDelta?: (delta: string) => void
+): Promise<{ success: true; message: any; retrievedChunks: any[]; specialPayload: any }> {
+  const { notebookId, message, documentFilterId } = body;
 
   await ensureNotebookRow(notebookId);
 
@@ -334,9 +377,9 @@ async function handleChat(req: Request) {
           { role: 'system', content: prompt.system },
           { role: 'user', content: prompt.user },
         ],
-        // Deep research must be long-form; 16K tokens of headroom while
-        // staying inside the 60s serverless limit.
-        { maxTokens: 16000 }
+        // Deep research must be long-form; 32K tokens of headroom. Streaming
+        // deltas flow to the client live when onDelta is provided.
+        { maxTokens: 32000, onDelta }
       );
       replyText = completion.text;
 
@@ -488,7 +531,7 @@ async function handleChat(req: Request) {
           { role: 'system', content: prompt.system },
           { role: 'user', content: prompt.user },
         ],
-        { maxTokens: 16000 }
+        { maxTokens: 32000, onDelta }
       );
       replyText = completion.text;
 
@@ -534,10 +577,13 @@ async function handleChat(req: Request) {
         citations = [];
         retrievedChunksForResponse = [];
       } else {
-        const completion = await ai.generateText([
-          { role: 'system', content: prompt.system },
-          { role: 'user', content: prompt.user },
-        ]);
+        const completion = await ai.generateText(
+          [
+            { role: 'system', content: prompt.system },
+            { role: 'user', content: prompt.user },
+          ],
+          { maxTokens: 8000, onDelta }
+        );
         replyText = completion.text;
 
         // Grounding classification. Hedge phrases alone are unreliable — a
@@ -613,12 +659,12 @@ async function handleChat(req: Request) {
     grounding_type: groundingType,
   });
 
-  return json({
-    success: true,
+  return {
+    success: true as const,
     message: assistantMsg,
     retrievedChunks: retrievedChunksForResponse,
     specialPayload,
-  });
+  };
 }
 
 // ==================== QUIZ GENERATION ====================

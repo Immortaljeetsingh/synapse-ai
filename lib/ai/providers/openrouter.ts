@@ -51,6 +51,62 @@ export class OpenRouterProvider extends BaseAIProvider {
     // Only ever call the user's chosen model. ponytail: no silent fallback —
     // retry once on 429 only; every other failure throws with the model id.
     for (let attempt = 0; attempt < 2; attempt++) {
+      // Streaming mode: SSE-parse deltas, invoke onDelta live, resolve full text.
+      if (options?.onDelta) {
+        const streamBody = { ...requestBody, stream: true };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`,
+            'HTTP-Referer': 'https://document-ai.app',
+            'X-Title': 'Document AI Studio',
+          },
+          body: JSON.stringify(streamBody),
+          signal: options?.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          const errText = res.body ? await res.text() : 'no response body';
+          if (res.status === 401) throw new Error('OpenRouter authentication failed (401). Check your API key.');
+          if (res.status === 429 && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          throw new Error(`OpenRouter model '${this.model}' failed (${res.status}): ${errText.slice(0, 200)}`);
+        }
+
+        let full = '';
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const payload = trimmed.slice(5).trim();
+            if (payload === '[DONE]') continue;
+            try {
+              const json = JSON.parse(payload);
+              const delta = json.choices?.[0]?.delta?.content || '';
+              if (delta) {
+                full += delta;
+                options.onDelta(delta);
+              }
+            } catch {}
+          }
+        }
+        if (!full.trim()) {
+          throw new Error(`OpenRouter model '${this.model}' returned an empty stream.`);
+        }
+        return { text: full, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+      }
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {

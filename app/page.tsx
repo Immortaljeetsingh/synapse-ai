@@ -446,21 +446,92 @@ export default function ChatStudioWorkspace() {
     await mutateBundle(nbId, (b) => ({ messages: [...b.messages, tempUserMsg] }));
 
     try {
-      const res = await fetch('/api/chat', {
+      // Streaming endpoint — the assistant bubble fills in live as tokens
+      // arrive, then the done event carries the final persisted message.
+      const liveMsgId = `msg_live_${Date.now()}`;
+      const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: getAIHeaders(),
         body: JSON.stringify({
           notebookId: nbId,
           message: msg,
           documents: documents,
+          stream: true,
         }),
       });
-      const data = await res.json();
 
-      if (data.success && data.message) {
-        // Keep the user's message visible — only append the assistant response
-        setChatMessages((prev) => [...prev, data.message]);
-        await mutateBundle(nbId, (b) => ({ messages: [...b.messages, data.message] }));
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('text/event-stream') || !res.body) {
+        // Legacy/non-streaming response — fall back to JSON handling.
+        const data = await res.json();
+        if (data.success && data.message) {
+          setChatMessages((prev) => [...prev, data.message]);
+          await mutateBundle(nbId, (b) => ({ messages: [...b.messages, data.message] }));
+          handleChatPayload(data);
+        }
+      } else {
+        // Seed a live assistant bubble that grows as deltas arrive.
+        const liveMsg: ChatMessage = {
+          id: liveMsgId,
+          session_id: 'session',
+          notebook_id: nbId,
+          role: 'assistant',
+          content: '',
+          grounding_type: 'direct_source',
+          created_at: new Date().toISOString(),
+        };
+        setChatMessages((prev) => [...prev, liveMsg]);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let donePayload: any = null;
+        let streamError: string | null = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            try {
+              const evt = JSON.parse(trimmed.slice(5).trim());
+              if (evt.type === 'delta' && evt.delta) {
+                setChatMessages((prev) =>
+                  prev.map((m) => (m.id === liveMsgId ? { ...m, content: m.content + evt.delta } : m))
+                );
+              } else if (evt.type === 'done') {
+                donePayload = evt;
+              } else if (evt.type === 'error') {
+                streamError = evt.error;
+              }
+            } catch {}
+          }
+        }
+
+        if (donePayload?.success && donePayload.message) {
+          // Swap the live bubble for the persisted message (final text +
+          // citations + grounding).
+          setChatMessages((prev) =>
+            prev.map((m) => (m.id === liveMsgId ? donePayload.message : m))
+          );
+          await mutateBundle(nbId, (b) => ({
+            messages: [...b.messages.filter((m) => m.id !== liveMsgId), donePayload.message],
+          }));
+          handleChatPayload(donePayload);
+        } else {
+          // Remove the empty live bubble; surface the failure visibly.
+          setChatMessages((prev) => prev.filter((m) => m.id !== liveMsgId));
+          throw new Error(streamError || 'The reply stream ended unexpectedly.');
+        }
+      }
+
+      async function handleChatPayload(data: any) {
+        // Special payloads only — the base assistant message is already
+        // appended/persisted by whichever path produced the payload.
 
         // If intent was flashcards, refresh and open Flashcards Companion tab
         if (data.specialPayload?.type === 'flashcards' && data.specialPayload.cards) {

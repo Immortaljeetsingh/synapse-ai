@@ -114,6 +114,58 @@ export class OpenCodeZenProvider extends BaseAIProvider {
       throw err;
     };
 
+    // Streaming mode — SSE-parse deltas, invoke onDelta live, resolve full text.
+    if (options?.onDelta) {
+      const streamRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({ ...requestBody, stream: true }),
+        signal: options?.signal,
+      });
+
+      if (!streamRes.ok || !streamRes.body) {
+        const errorText = await streamRes.text().catch(() => 'no response body');
+        fail(`OpenCode Zen API error (${streamRes.status}): ${errorText.slice(0, 200)}`, streamRes.status);
+      }
+      const streamBody = streamRes.body!;
+
+      let full = '';
+      const reader = streamBody.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const payload = trimmed.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              full += delta;
+              options.onDelta(delta);
+            }
+          } catch {}
+        }
+      }
+      if (!full.trim()) {
+        throw new Error('OpenCode Zen returned an empty stream.');
+      }
+      return {
+        text: full,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      };
+    }
+
     const sendRequest = () =>
       this.retryWithBackoff(async () => {
         const res = await fetch(endpoint, {
