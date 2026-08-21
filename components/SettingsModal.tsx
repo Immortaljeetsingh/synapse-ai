@@ -214,7 +214,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div className="grid grid-cols-3 gap-1.5">
               {[
                 { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-oss-20b:free' },
-                { id: 'opencode_zen', name: 'OpenCode Zen', url: 'https://opencode.ai/zen/v1', defaultModel: 'deepseek-v4-flash-max' },
+                { id: 'opencode_zen', name: 'OpenCode Zen', url: 'https://opencode.ai/zen/v1', defaultModel: 'deepseek-v4-flash-free' },
                 { id: 'openai', name: 'OpenAI', url: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
                 { id: 'groq', name: 'Groq Cloud', url: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
                 { id: 'deepseek', name: 'DeepSeek', url: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
@@ -254,7 +254,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   setModel('openai/gpt-oss-20b:free');
                 } else if (e.target.value === 'opencode_zen') {
                   setBaseUrl('https://opencode.ai/zen/v1');
-                  setModel('deepseek-v4-flash-max');
+                  setModel('deepseek-v4-flash-free');
                 } else if (e.target.value === 'openai') {
                   setBaseUrl('https://api.openai.com/v1');
                   setModel('gpt-4o-mini');
@@ -275,7 +275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-200 focus:outline-none focus:border-neutral-600"
             >
               <option value="openrouter">OpenRouter (Any open model)</option>
-              <option value="opencode_zen">OpenCode Zen (deepseek-v4-flash-max)</option>
+              <option value="opencode_zen">OpenCode Zen (deepseek-v4-flash-free)</option>
               <option value="openai">OpenAI (GPT-4o, GPT-4o-mini, etc.)</option>
               <option value="groq">Groq Cloud (Fast Llama 3.3, Mixtral)</option>
               <option value="deepseek">DeepSeek API (deepseek-chat, deepseek-reasoner)</option>
