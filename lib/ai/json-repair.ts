@@ -41,8 +41,8 @@ export function parseAndRepairJson<T = any>(rawText: string): T {
     .replace(/,\s*([}\]])/g, '$1')
     // Fix unquoted keys (e.g. { key: "value" } -> { "key": "value" })
     .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
-    // Remove single line comments
-    .replace(/\/\/[^\n\r]*/g, '')
+    // Remove single line comments — but not "//" inside URLs (https://...)
+    .replace(/(?<!:)\/\/[^\n\r]*/g, '')
     // Replace single quotes with double quotes around simple string values
     .replace(/:\s*'([^']*)'/g, ': "$1"');
 

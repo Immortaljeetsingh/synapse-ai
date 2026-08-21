@@ -391,7 +391,7 @@ CORE OPERATING PRINCIPLES:
    - BULLET RULE: Use "-" for unordered bullets. NEVER use "*" as a bullet marker. Use "1." for numbered lists.
    - Max 2 levels of bullet nesting.
    - Use Markdown tables whenever presenting comparative criteria, stages, or multi-attribute data.
-   - Render mathematical expressions using LaTeX: inline with \\(...\\) and block with \\[...\\].
+   - Render mathematical expressions as plain text (e.g. "x = 5" or "15% of Tier 1 capital"). Do NOT use LaTeX/TeX notation — the UI has no math renderer.
 5. CITATIONS:
    - Attach exact citations for all claims: [Document_Name.docx, p. X] or [Document A, p. 13; Document B, p. 18].
    - Conclude with a clean "## Sources" section listing referenced documents and page numbers.

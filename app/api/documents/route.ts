@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import path from 'path';
 import { saveUploadedFile } from '@/lib/storage';
-import { createDocument, getDocumentsByNotebook, insertChunks, createNote } from '@/lib/db/queries';
+import { createDocument, getDocumentsByNotebook, getNotebookById, insertChunks, createNote } from '@/lib/db/queries';
 import { detectFileType, parseDocument } from '@/lib/parsers';
 import { chunkDocument } from '@/lib/rag/chunker';
 import { computeTextVector } from '@/lib/rag/embeddings';
@@ -13,6 +13,32 @@ import { DocumentChunk } from '@/lib/types';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB limit
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.xls', '.csv', '.txt', '.md'];
+
+// Magic-byte signatures per extension. Text formats (.txt/.md/.csv) are
+// validated as printable UTF-8-ish content instead of a fixed signature.
+function validateMagicBytes(buffer: Buffer, ext: string): boolean {
+  const head = buffer.subarray(0, 8);
+  switch (ext) {
+    case '.pdf':
+      return head.subarray(0, 5).toString('binary') === '%PDF-';
+    case '.docx':
+    case '.xlsx':
+    case '.xls':
+      // OOXML files are ZIP archives; legacy .xls is OLE2 compound document
+      return (
+        head.subarray(0, 4).toString('hex') === '504b0304' ||
+        head.subarray(0, 8).toString('hex') === 'd0cf11e0a1b11ae1'
+      );
+    case '.csv':
+    case '.txt':
+    case '.md': {
+      // Reject obvious binaries (NUL bytes in the first 512 bytes)
+      return !buffer.subarray(0, Math.min(512, buffer.length)).includes(0);
+    }
+    default:
+      return false;
+  }
+}
 
 export async function GET(req: Request) {
   try {
@@ -39,6 +65,11 @@ export async function POST(req: Request) {
         { success: false, error: 'notebookId and file are required' },
         { status: 400 }
       );
+    }
+
+    const notebook = await getNotebookById(notebookId);
+    if (!notebook) {
+      return NextResponse.json({ success: false, error: 'Notebook not found' }, { status: 404 });
     }
 
     if (file.size > MAX_FILE_SIZE) {
@@ -69,6 +100,15 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { success: false, error: 'Uploaded file is empty (0 bytes).' },
         { status: 400 }
+      );
+    }
+
+    // Magic-byte validation — reject files whose content doesn't match the
+    // claimed extension (e.g. an .exe renamed to .pdf).
+    if (!validateMagicBytes(buffer, ext)) {
+      return NextResponse.json(
+        { success: false, error: `File content does not match its "${ext}" extension.` },
+        { status: 415 }
       );
     }
 

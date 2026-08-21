@@ -38,28 +38,49 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
     }
   }, [isOpen]);
 
+  // ESC closes the modal (the footer advertises it)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
+
   useEffect(() => {
     if (!query.trim() || !notebookId) {
       setResults([]);
       return;
     }
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
-        const res = await fetch(`/api/search?notebookId=${notebookId}&q=${encodeURIComponent(query)}`);
+        const res = await fetch(
+          `/api/search?notebookId=${notebookId}&q=${encodeURIComponent(query)}`,
+          { signal: controller.signal }
+        );
         const data = await res.json();
         if (data.success) {
           setResults(data.results || []);
+        } else {
+          setResults([]);
         }
-      } catch (e) {
-        console.error('Search error:', e);
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') console.error('Search error:', e);
       } finally {
         setIsLoading(false);
       }
     }, 200);
 
-    return () => clearTimeout(timer);
+    // Abort the in-flight request when query changes/unmounts — a slow stale
+    // response used to overwrite results for the newer query.
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query, notebookId]);
 
   if (!isOpen) return null;

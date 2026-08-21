@@ -11,7 +11,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Question and correctAnswer are required' }, { status: 400 });
     }
 
-    const ai = await getAIProvider();
+    const ai = await getAIProvider({
+      apiKey: req.headers.get('x-api-key') || undefined,
+      provider: req.headers.get('x-provider') || undefined,
+      model: req.headers.get('x-model') || undefined,
+      baseUrl: req.headers.get('x-base-url') || undefined,
+    });
     const prompt = PROMPTS.EXPLAIN_DIFFERENTLY(question, correctAnswer, explanation || '');
 
     const res = await ai.generateText([

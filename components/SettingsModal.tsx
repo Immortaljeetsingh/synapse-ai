@@ -199,7 +199,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div className="grid grid-cols-3 gap-1.5">
               {[
                 { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-oss-20b:free' },
-                { id: 'opencode_zen', name: 'OpenCode Zen', url: 'https://api.opencodezen.com/v1', defaultModel: 'deepseek-v4-flash-max' },
+                { id: 'opencode_zen', name: 'OpenCode Zen', url: 'https://opencode.ai/zen/v1', defaultModel: 'deepseek-v4-flash-max' },
                 { id: 'openai', name: 'OpenAI', url: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
                 { id: 'groq', name: 'Groq Cloud', url: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
                 { id: 'deepseek', name: 'DeepSeek', url: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
@@ -238,7 +238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   setBaseUrl('https://openrouter.ai/api/v1');
                   setModel('openai/gpt-oss-20b:free');
                 } else if (e.target.value === 'opencode_zen') {
-                  setBaseUrl('https://api.opencodezen.com/v1');
+                  setBaseUrl('https://opencode.ai/zen/v1');
                   setModel('deepseek-v4-flash-max');
                 } else if (e.target.value === 'openai') {
                   setBaseUrl('https://api.openai.com/v1');

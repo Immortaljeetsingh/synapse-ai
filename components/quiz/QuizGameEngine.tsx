@@ -104,17 +104,20 @@ export const QuizGameEngine: React.FC<QuizGameEngineProps> = ({
 
       const timeSpent = Math.round((Date.now() - questionStartTime) / 1000);
 
-      // Normalize matching
+      // Strict grading: the server normalizes correct_answer to the exact
+      // prefixed option string, so equality is the primary check. The letter
+      // fallbacks only handle legacy rows stored before normalization.
       const correctAns = currentQ?.correct_answer?.trim() || '';
-      const correctLetter = correctAns.charAt(0);
-      const chosenLetter = chosenOpt ? chosenOpt.trim().charAt(0) : '';
+      const chosenTrim = chosenOpt ? chosenOpt.trim() : '';
+      const stripPrefix = (s: string) => s.replace(/^[A-Fa-f]\)\s*/, '');
+      const letterOf = (s: string) => (s.length > 1 && /^[A-Fa-f]\)/.test(s) ? s.charAt(0).toUpperCase() : '');
 
       const isMatch =
         chosenOpt !== null &&
-        (chosenOpt.trim() === correctAns ||
-          chosenOpt.includes(correctAns) ||
-          correctAns.includes(chosenOpt) ||
-          (chosenLetter.length === 1 && chosenLetter === correctLetter));
+        chosenTrim !== '' &&
+        (chosenTrim === correctAns ||
+          stripPrefix(chosenTrim).toLowerCase() === stripPrefix(correctAns).toLowerCase() ||
+          (letterOf(chosenTrim) !== '' && letterOf(chosenTrim) === letterOf(correctAns)));
 
       setIsCorrect(isMatch);
       setIsAnswerSubmitted(true);

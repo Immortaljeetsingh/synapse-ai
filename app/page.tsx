@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   PanelRight,
   PanelRightClose,
@@ -17,8 +17,6 @@ import {
 import { Sidebar } from '@/components/chat/Sidebar';
 import { ChatArea } from '@/components/chat/ChatArea';
 import { PromptComposer } from '@/components/chat/PromptComposer';
-import { DocumentViewerModal } from '@/components/DocumentViewerModal';
-import { QuizConfigModal } from '@/components/quiz/QuizConfigModal';
 import { SynapseLogo } from '@/components/brand/SynapseLogo';
 import { DocumentDrawer } from '@/components/chat/DocumentDrawer';
 import { LibraryModal } from '@/components/chat/LibraryModal';
@@ -76,6 +74,10 @@ export default function ChatStudioWorkspace() {
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestionItem[]>([]);
   const [quizConfig, setQuizConfig] = useState<QuizConfig | null>(null);
   const [quizTitle, setQuizTitle] = useState<string>('Document Knowledge Quiz');
+  // Real quiz row ID for attempt persistence — a fabricated ID used to be sent
+  // here, orphaning every attempt from its quiz.
+  const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
+  const [modelBadge, setModelBadge] = useState<string>('');
   const [quizResults, setQuizResults] = useState<{
     score: number;
     totalQuestions: number;
@@ -180,6 +182,9 @@ export default function ChatStudioWorkspace() {
   // 1. Initial Load
   useEffect(() => {
     fetchNotebooks();
+    if (typeof window !== 'undefined') {
+      setModelBadge(localStorage.getItem('synapse_model') || '');
+    }
   }, [fetchNotebooks]);
 
   // 2. Load Notebook Details on change
@@ -200,21 +205,6 @@ export default function ChatStudioWorkspace() {
     } catch (e) {
       console.error('Error deleting notebook:', e);
     }
-  };
-
-  const getClientHeaders = () => {
-    const apiKey = typeof window !== 'undefined' ? localStorage.getItem('synapse_api_key') || '' : '';
-    const provider = typeof window !== 'undefined' ? localStorage.getItem('synapse_provider') || 'openrouter' : 'openrouter';
-    const model = typeof window !== 'undefined' ? localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free' : 'openai/gpt-oss-20b:free';
-    const baseUrl = typeof window !== 'undefined' ? localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1' : 'https://openrouter.ai/api/v1';
-
-    return {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'x-provider': provider,
-      'x-model': model,
-      'x-base-url': baseUrl,
-    };
   };
 
   // Upload Handlers
@@ -298,6 +288,7 @@ export default function ChatStudioWorkspace() {
         if (data.specialPayload?.type === 'quiz_ready' && data.specialPayload.questions) {
           setQuizQuestions(data.specialPayload.questions);
           setQuizTitle(data.specialPayload.title);
+          setActiveQuizId(data.specialPayload.quizId || null);
           setQuizConfig({
             sourceType: 'notebook',
             questionCount: data.specialPayload.questionCount,
@@ -357,20 +348,25 @@ export default function ChatStudioWorkspace() {
     }
   };
 
+  // Debounce timers for note autosave — one in-flight write per keystroke
+  // used to hammer the API and out-of-order responses could revert typing.
+  const noteSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
   const handleUpdateNote = async (id: string, updates: Partial<NoteRecord>) => {
-    try {
-      const res = await fetch(`/api/notes/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...updates } : n)));
+    // Optimistic local update first so typing stays instant
+    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...updates } : n)));
+    if (noteSaveTimers.current[id]) clearTimeout(noteSaveTimers.current[id]);
+    noteSaveTimers.current[id] = setTimeout(async () => {
+      try {
+        await fetch(`/api/notes/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        });
+      } catch (err) {
+        console.error('Error updating note:', err);
       }
-    } catch (err) {
-      console.error('Error updating note:', err);
-    }
+    }, 500);
   };
 
   const handleDeleteNote = async (id: string) => {
@@ -434,12 +430,19 @@ export default function ChatStudioWorkspace() {
     setQuizResults(results);
     setIsQuizActive(false);
 
+    // Attempts reference a real quizzes row (NOT NULL + FK). If we somehow
+    // have no quiz id, there is nothing valid to persist.
+    if (!activeQuizId) {
+      loadNotebook(activeNotebookId);
+      return;
+    }
+
     try {
       await fetch('/api/quiz/attempt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          quizId: `quiz_${Date.now()}`,
+          quizId: activeQuizId,
           notebookId: activeNotebookId,
           title: quizTitle,
           ...results,
@@ -467,6 +470,7 @@ export default function ChatStudioWorkspace() {
       if (data.success && data.questions?.length > 0) {
         setQuizQuestions(data.questions);
         setQuizTitle(data.quiz?.title || 'Interactive Knowledge Quiz');
+        setActiveQuizId(data.quiz?.id || null);
         setQuizConfig(config);
         setQuizResults(null);
         setIsReviewingAnswers(false);
@@ -534,7 +538,7 @@ export default function ChatStudioWorkspace() {
             </h2>
             <div className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-[10px] text-neutral-500 font-mono">
               <Cpu className="w-3 h-3 text-neutral-400" />
-              <span>GPT-OSS 20B</span>
+              <span>{modelBadge || 'AI Model'}</span>
             </div>
           </div>
 
@@ -561,7 +565,31 @@ export default function ChatStudioWorkspace() {
           isLoading={isChatLoading}
           onSendMessage={handleSendMessage}
           onOpenCitation={handleOpenCitation}
-          onLaunchQuizMode={() => handleSendMessage('Quiz me on this PDF with 10 questions.')}
+          onLaunchQuizMode={(payload) => {
+            // Launch the quiz that was already generated for this message —
+            // the old handler discarded the payload and asked the AI to
+            // regenerate a different quiz.
+            if (payload?.questions?.length > 0) {
+              setQuizQuestions(payload.questions);
+              setQuizTitle(payload.title || 'Knowledge Quiz');
+              setActiveQuizId(payload.quizId || null);
+              setQuizConfig({
+                sourceType: 'notebook',
+                questionCount: payload.questionCount || payload.questions.length,
+                difficulty: 'medium',
+                questionType: 'mixed',
+                mode: 'practice',
+                timerSeconds: 0,
+                enableXp: true,
+                enableStreaks: true,
+              });
+              setQuizResults(null);
+              setIsReviewingAnswers(false);
+              setIsQuizActive(true);
+            } else {
+              handleSendMessage('Quiz me on this document with 10 questions.');
+            }
+          }}
         />
 
         {/* Large Rounded Prompt Composer */}
@@ -641,7 +669,15 @@ export default function ChatStudioWorkspace() {
       />
 
       {/* AI Settings & Connection Modal */}
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => {
+          setIsSettingsOpen(false);
+          if (typeof window !== 'undefined') {
+            setModelBadge(localStorage.getItem('synapse_model') || '');
+          }
+        }}
+      />
 
       {/* Focused Interactive Quiz Mode Overlay */}
       {isQuizActive && quizConfig && (

@@ -23,7 +23,6 @@ A high-performance, document-grounded research partner and active-recall learnin
 - **Database**: SQLite via `sql.js` (Serverless-compatible embedded DB)
 - **Document Parsers**: `pdf-parse`, `mammoth` (DOCX), `xlsx` (Spreadsheets)
 - **Vector Retrieval**: Hybrid BM25 keyword + Cosine similarity semantic retrieval
-- **Testing**: Playwright automated multi-viewport testing suite
 
 ---
 
@@ -88,10 +87,13 @@ npm run start
 
 ## 🔒 Security & Privacy
 
-- **Server-Side API Key Containment**: API keys are never bundled into client-side JavaScript or exposed in browser network requests.
-- **SSRF & Path Traversal Protection**: Uploaded files are sanitized, given random internal identifiers, validated against magic bytes, and capped at 50 MB.
+- **Bring-Your-Own-Key**: API keys are entered in Settings and stored in your browser (localStorage) plus the local app database; they are sent with each AI request so serverless deployments never need persistent secrets. Anyone using the app in a shared/browser environment should treat keys accordingly.
+- **Upload Validation**: Filenames are sanitized, extensions are allow-listed, file content is validated against magic-byte signatures (PDF `%PDF-`, OOXML/OLE2 ZIP headers, binary rejection for text formats), and uploads are capped at 50 MB.
 - **Prompt Injection Defense**: Document passages and user queries are treated strictly as inert source data with strict system prompt boundaries.
 - **Zero Secret Commits**: Sensitive files (`.env`, `.env.local`, SQLite databases, uploads) are strictly excluded via `.gitignore`.
+- **Honest Offline Mode**: With no API key configured, the app clearly says AI features are unavailable instead of fabricating document-grounded content.
+
+> **Deployment note**: SQLite data and uploaded files live on the server filesystem (`./data` locally, `/tmp` on Vercel). On serverless platforms storage is ephemeral per warm instance — for durable multi-user persistence, point `DB_PATH`/`UPLOAD_DIR` at a mounted volume or migrate to a hosted database.
 
 ---
 

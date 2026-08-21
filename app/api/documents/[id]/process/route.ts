@@ -8,17 +8,20 @@ import {
   insertChunks,
   deleteChunksByDocument,
   createNote,
-  saveArtifact,
 } from '@/lib/db/queries';
 import { parseDocument } from '@/lib/parsers';
 import { chunkDocument } from '@/lib/rag/chunker';
 import { computeTextVector } from '@/lib/rag/embeddings';
 import { DocumentChunk } from '@/lib/types';
-import { getAIProvider, PROMPTS } from '@/lib/ai';
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const docId = params.id;
-  const doc = await getDocumentById(docId);
+  let doc;
+  try {
+    doc = await getDocumentById(docId);
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 
   if (!doc) {
     return NextResponse.json({ success: false, error: 'Document not found' }, { status: 404 });
@@ -55,23 +58,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       is_scanned: parsed.isScanned,
     });
 
-    // 6. Generate lightweight initial study note asynchronously / safely
+    // 6. Create lightweight initial study note (no AI needed)
     const fullText = parsed.fullText || processedChunks.map((c) => c.text).join('\n\n');
     if (fullText.trim().length > 30) {
       try {
-        const apiKeyHeader = req.headers.get('x-api-key') || undefined;
-        const providerHeader = req.headers.get('x-provider') || undefined;
-        const modelHeader = req.headers.get('x-model') || undefined;
-        const baseUrlHeader = req.headers.get('x-base-url') || undefined;
-
-        const ai = await getAIProvider({
-          apiKey: apiKeyHeader,
-          provider: providerHeader,
-          model: modelHeader,
-          baseUrl: baseUrlHeader,
-        });
-
-        // Create standard initial note
         const noteId = `note_auto_${doc.id}_${Date.now()}`;
         const summarySnippet = fullText.slice(0, 1500);
         await createNote({

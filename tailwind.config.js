@@ -9,6 +9,10 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // Used across the UI for subtle hover/selection surfaces; not a
+        // default Tailwind color.
+        'neutral-850': '#262626',
+        'slate-750': '#334155',
         brand: {
           50: '#eef2ff',
           100: '#e0e7ff',

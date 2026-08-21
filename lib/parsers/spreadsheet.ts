@@ -11,8 +11,6 @@ export async function parseSpreadsheet(filePath: string): Promise<ParsedDocument
     const worksheet = workbook.Sheets[sheetName];
     // Convert to json objects for structured analysis
     const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { header: 1 });
-    // Convert to markdown table format
-    const csvData = XLSX.utils.sheet_to_csv(worksheet);
 
     if (jsonData.length === 0) continue;
 
@@ -22,7 +20,7 @@ export async function parseSpreadsheet(filePath: string): Promise<ParsedDocument
     let sheetText = `### Sheet: ${sheetName}\n\n`;
     sheetText += `**Summary**: Sheet contains ${rowCount} rows and ${headers.length} columns: [${headers.join(', ')}]\n\n`;
 
-    // Add markdown representation of rows (up to first 200 rows per sheet to avoid token explosion, but structured)
+    // Preview the first 100 rows per sheet to avoid token explosion
     const previewRows = jsonData.slice(0, 100);
     if (previewRows.length > 0) {
       sheetText += '#### Data Records:\n';
@@ -37,7 +35,9 @@ export async function parseSpreadsheet(filePath: string): Promise<ParsedDocument
       }
 
       if (jsonData.length > 100) {
-        sheetText += `\n*(...${jsonData.length - 100} additional rows indexed)*\n`;
+        // ponytail: rows beyond 100 are NOT indexed — raise this cap when a
+        // real workbook actually needs it.
+        sheetText += `\n*(...${jsonData.length - 100} additional rows not indexed)*\n`;
       }
     }
 

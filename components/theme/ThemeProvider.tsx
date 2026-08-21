@@ -74,7 +74,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const toggleTheme = () => {
-    setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    // Flip the CURRENTLY EFFECTIVE theme — from 'system' the old logic always
+    // landed on dark because it compared against the mode, not the resolution.
+    setThemeState((prev) => (resolvedTheme === 'dark' ? 'light' : 'dark'));
   };
 
   return (

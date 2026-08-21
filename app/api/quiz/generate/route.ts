@@ -9,7 +9,8 @@ import {
   getWeakTopics,
 } from '@/lib/db/queries';
 import { getAIProvider, PROMPTS } from '@/lib/ai';
-import { QuizConfig, QuizQuestionItem } from '@/lib/types';
+import { normalizeQuizQuestions } from '@/lib/ai/quiz-normalize';
+import { QuizConfig } from '@/lib/types';
 
 export async function POST(req: Request) {
   try {
@@ -192,61 +193,25 @@ export async function POST(req: Request) {
     const quizId = `quiz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const quizTitle = aiRes.quiz_title || `Quiz on ${topic || 'Document Knowledge'}`;
 
-    // 3. Validate & Format Questions
-    const validatedQuestions: QuizQuestionItem[] = [];
+    // 3. Validate & Format Questions (shared normalizer — guarantees options
+    // are letter-prefixed once and correct_answer resolves to the exact
+    // option string, so client grading is strict-equality safe)
+    const validatedQuestions = normalizeQuizQuestions(finalRawQuestions, {
+      quizId,
+      fallbackSource: selectedChunks[0]?.filename,
+      fallbackPage: selectedChunks[0]?.page_number,
+    }).map((q, i) => ({
+      ...q,
+      id: `qq_${quizId}_${i}`,
+      topic: q.topic === 'General' && topic ? topic : q.topic,
+      chunk_id: selectedChunks[i % selectedChunks.length]?.id,
+    }));
 
-    for (let i = 0; i < finalRawQuestions.length; i++) {
-      const q = finalRawQuestions[i];
-      let options = Array.isArray(q.options) ? q.options : [];
-      let correctAnswer = q.correct_answer || options[0] || 'A';
-
-      // Ensure True/False has proper options
-      if (q.question_type === 'true_false' && options.length === 0) {
-        options = ['True', 'False'];
-      }
-
-      // If options are bare text without A), B), prefix them cleanly
-      options = options.map((opt: string, idx: number) => {
-        const prefix = `${String.fromCharCode(65 + idx)}) `;
-        return opt.startsWith('A)') ||
-          opt.startsWith('B)') ||
-          opt.startsWith('C)') ||
-          opt.startsWith('D)') ||
-          opt === 'True' ||
-          opt === 'False'
-          ? opt
-          : `${prefix}${opt}`;
-      });
-
-      // Match correct answer format
-      if (!options.includes(correctAnswer)) {
-        const matchingOpt = options.find((opt: string) =>
-          opt.toLowerCase().includes(correctAnswer.toLowerCase())
-        );
-        if (matchingOpt) {
-          correctAnswer = matchingOpt;
-        } else if (options.length > 0) {
-          correctAnswer = options[0];
-        }
-      }
-
-      // Link chunk / page attribution
-      const matchingChunk = selectedChunks[i % selectedChunks.length];
-
-      validatedQuestions.push({
-        id: `qq_${quizId}_${i}`,
-        quiz_id: quizId,
-        question: q.question || `Question ${i + 1}`,
-        question_type: q.question_type || 'multiple_choice',
-        options,
-        correct_answer: correctAnswer,
-        explanation: q.explanation || 'Grounded directly in the source documents.',
-        topic: q.topic || topic || 'General',
-        difficulty: q.difficulty || difficulty || 'medium',
-        source_document: q.source_document || matchingChunk?.filename || 'Uploaded Document',
-        page_number: q.page_number || matchingChunk?.page_number || 1,
-        chunk_id: matchingChunk?.id,
-      });
+    if (validatedQuestions.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'The AI returned malformed questions. Please try again.' },
+        { status: 502 }
+      );
     }
 
     // 4. Save Quiz in DB

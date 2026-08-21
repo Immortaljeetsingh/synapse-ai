@@ -12,10 +12,10 @@ import {
 } from '@/lib/db/queries';
 import { hybridRetrieve, multiStageDeepRetrieve } from '@/lib/rag/retrieval';
 import { getAIProvider, PROMPTS } from '@/lib/ai';
+import { normalizeQuizQuestions } from '@/lib/ai/quiz-normalize';
 import {
   CitationReference,
   FlashcardRecord,
-  QuizQuestionItem,
   GroundingType,
 } from '@/lib/types';
 
@@ -25,9 +25,10 @@ function detectIntent(message: string): {
 } {
   const lower = message.toLowerCase().trim();
 
-  // Flashcards intent
-  if (lower.includes('flashcard') || lower.includes('flash card') || lower.includes('cards')) {
-    const match = lower.match(/\b(\d+)\s*(?:flashcards?|cards?)\b/);
+  // Flashcards intent — "flashcard" only; a bare "cards" match used to hijack
+  // questions like "show me the credit cards in the document".
+  if (lower.includes('flashcard') || lower.includes('flash card')) {
+    const match = lower.match(/\b(\d+)\s*(?:flashcards?)\b/);
     const count = match ? parseInt(match[1], 10) : 8;
     return { intent: 'flashcards', count: Math.min(Math.max(count, 3), 20) };
   }
@@ -153,6 +154,9 @@ export async function POST(req: Request) {
     }
 
     // 2. Handle Intents
+    // Wrapped so an AI/provider failure still produces an assistant reply —
+    // otherwise the user message is persisted with no response forever.
+    try {
 
     // A. DEEP RESEARCH & ANALYTICAL REPORT (Multi-Stage Subtopic Retrieval)
     if (intentData.intent === 'deep_research') {
@@ -269,28 +273,10 @@ export async function POST(req: Request) {
       const quizTitle = res.quiz_title || 'Knowledge Quiz';
       const rawQuestions = res.questions || [];
 
-      const validatedQuestions: QuizQuestionItem[] = rawQuestions.map((q, i) => {
-        let opts = Array.isArray(q.options) ? q.options : ['A', 'B', 'C', 'D'];
-        opts = opts.map((opt: string, idx: number) => {
-          const prefix = `${String.fromCharCode(65 + idx)}) `;
-          return opt.startsWith('A)') || opt.startsWith('B)') || opt.startsWith('C)') || opt.startsWith('D)') || opt === 'True' || opt === 'False'
-            ? opt
-            : `${prefix}${opt}`;
-        });
-        const matchChunk = retrieval.chunks[i % (retrieval.chunks.length || 1)];
-        return {
-          id: `qq_${quizId}_${i}`,
-          quiz_id: quizId,
-          question: q.question,
-          question_type: q.question_type || 'multiple_choice',
-          options: opts,
-          correct_answer: q.correct_answer || opts[0],
-          explanation: q.explanation || 'Based on source document passages.',
-          topic: q.topic || 'General',
-          difficulty: q.difficulty || 'medium',
-          source_document: matchChunk?.documentName || 'Document',
-          page_number: matchChunk?.pageNumber || 1,
-        };
+      const validatedQuestions = normalizeQuizQuestions(rawQuestions, {
+        quizId,
+        fallbackSource: retrieval.chunks[0]?.documentName,
+        fallbackPage: retrieval.chunks[0]?.pageNumber,
       });
 
       await createQuiz({
@@ -374,6 +360,7 @@ export async function POST(req: Request) {
       replyText = completion.text;
 
       if (
+        replyText.includes("couldn't find sufficient evidence") ||
         replyText.includes("couldn't find this information") ||
         replyText.includes('not available in the uploaded sources') ||
         retrieval.chunks.length === 0
@@ -387,6 +374,14 @@ export async function POST(req: Request) {
         groundingType = 'direct_source';
         citations = retrieval.citations;
       }
+    }
+
+    } catch (genErr: any) {
+      console.error('AI generation failed in chat route:', genErr);
+      replyText = `**I couldn't complete that request.**\n\n\`${genErr?.message || 'The AI provider returned an error.'}\`\n\nYour message was saved — try again in a moment, or check **Settings → connection status** if the problem persists.`;
+      groundingType = 'ai_interpretation';
+      citations = [];
+      specialPayload = null;
     }
 
     // 3. Save Assistant Message

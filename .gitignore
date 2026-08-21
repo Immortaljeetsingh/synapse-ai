@@ -48,7 +48,6 @@ Thumbs.db
 /coverage/
 .playwright/
 /test-results/
-*.mjs
 test-*.js
 live-*.js
 tsconfig.tsbuildinfo

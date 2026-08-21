@@ -43,7 +43,15 @@ export async function GET(req: Request) {
       })
       .join('\n\n');
 
-    const ai = await getAIProvider();
+    // Honor client-provided credentials like every other AI route — without
+    // this, users whose key lives only in localStorage silently got the
+    // offline fallback here.
+    const ai = await getAIProvider({
+      apiKey: req.headers.get('x-api-key') || undefined,
+      provider: req.headers.get('x-provider') || undefined,
+      model: req.headers.get('x-model') || undefined,
+      baseUrl: req.headers.get('x-base-url') || undefined,
+    });
     const prompt = PROMPTS.DOCUMENT_COMPARISON(docSummarySnippets);
     const comparison = await ai.generateStructuredJson([
       { role: 'system', content: prompt.system },

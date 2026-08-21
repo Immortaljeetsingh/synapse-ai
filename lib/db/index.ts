@@ -3,9 +3,18 @@ import path from 'path';
 import fs from 'fs';
 import { DB_SCHEMA } from './schema';
 
-const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NEXT_RUNTIME === 'nodejs');
-const DB_DIR = isServerless ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DB_DIR, 'app.db');
+// Only treat as ephemeral/serverless when actually deployed there.
+// NEXT_RUNTIME === 'nodejs' is also true in local dev, so it must NOT be used here.
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+const DB_DIR = process.env.DB_PATH
+  ? path.dirname(path.resolve(process.env.DB_PATH))
+  : isServerless
+    ? path.join('/tmp', 'data')
+    : path.join(process.cwd(), 'data');
+const DB_PATH = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(DB_DIR, 'app.db');
 
 try {
   if (!fs.existsSync(DB_DIR)) {
@@ -35,7 +44,7 @@ async function getSqlJs() {
           try {
             const buf = fs.readFileSync(p);
             const arrayBuf = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-            return initSqlJs({ wasmBinary: arrayBuf });
+            return await initSqlJs({ wasmBinary: arrayBuf });
           } catch {}
         }
       }
@@ -70,7 +79,7 @@ export async function getDb(): Promise<Database> {
     db = new SQL.Database();
   }
 
-  // Execute schema
+  // Execute schema (CREATE TABLE IF NOT EXISTS ...)
   try {
     db.run(DB_SCHEMA);
   } catch (err) {
@@ -80,6 +89,19 @@ export async function getDb(): Promise<Database> {
   try {
     db.run(`ALTER TABLE chat_messages ADD COLUMN special_payload_json TEXT;`);
   } catch {}
+
+  // Pragmas must run as standalone statements AFTER the schema. Run and verify:
+  // if enforcement cannot be enabled we log loudly, because queries.ts relies on it.
+  try {
+    db.run(`PRAGMA foreign_keys = ON;`);
+    const fk = db.exec('PRAGMA foreign_keys;');
+    const enabled = fk[0]?.values?.[0]?.[0] === 1;
+    if (!enabled) {
+      console.warn('[db] PRAGMA foreign_keys could not be enabled — relying on explicit cascade deletes.');
+    }
+  } catch (err) {
+    console.error('[db] Failed to set PRAGMA foreign_keys:', err);
+  }
 
   dbInstance = db;
   saveDb();

@@ -64,10 +64,21 @@ export const QuizConfigModal: React.FC<QuizConfigModalProps> = ({
     }
   }, [isOpen, initialConfig]);
 
+  // Keep the doc selection in sync — the modal is permanently mounted while
+  // documents load async, so the one-time initializer used to capture ''.
+  useEffect(() => {
+    setSelectedDocId((prev) => {
+      if (prev && documents.some((d) => d.id === prev)) return prev;
+      return documents[0]?.id || '';
+    });
+  }, [documents]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sourceType === 'document' && !selectedDocId) return;
+    if (sourceType === 'topic' && (!selectedTopic || selectedTopic === 'all')) return;
     await onStartQuiz({
       sourceType,
       documentId: sourceType === 'document' ? selectedDocId : null,

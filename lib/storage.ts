@@ -1,8 +1,14 @@
 import path from 'path';
 import fs from 'fs';
 
-const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NEXT_RUNTIME === 'nodejs');
-const UPLOAD_DIR = isServerless ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'uploads');
+// Only treat as ephemeral/serverless when actually deployed there.
+// NEXT_RUNTIME === 'nodejs' is also true in local dev, so it must NOT be used here.
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const UPLOAD_DIR = process.env.UPLOAD_DIR
+  ? path.resolve(process.env.UPLOAD_DIR)
+  : isServerless
+    ? path.join('/tmp', 'uploads')
+    : path.join(process.cwd(), 'uploads');
 
 try {
   if (!fs.existsSync(UPLOAD_DIR)) {

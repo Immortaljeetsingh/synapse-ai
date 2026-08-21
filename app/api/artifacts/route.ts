@@ -4,9 +4,7 @@ import {
   getChunksByNotebook,
   getDocumentsByNotebook,
   insertFlashcards,
-  insertQuestions,
   deleteFlashcardsByNotebook,
-  deleteQuestionsByNotebook,
 } from '@/lib/db/queries';
 import { getAIProvider, PROMPTS, setCachedArtifact, getCachedArtifact } from '@/lib/ai';
 import { ArtifactType, FlashcardRecord, QuestionRecord } from '@/lib/types';
@@ -45,13 +43,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'No documents or chunks available in this notebook' }, { status: 400 });
     }
 
-    const fullContextText = chunks
-      .slice(0, 20)
+    // Sample evenly across the whole corpus instead of only the first 20
+    // chunks — otherwise overviews/summaries ignored everything after the
+    // first few pages and every document after the first.
+    const stride = Math.max(1, Math.ceil(chunks.length / 60));
+    const sampledChunks = chunks.filter((_, i) => i % stride === 0).slice(0, 60);
+    const fullContextText = sampledChunks
       .map((c) => `[Doc: ${c.filename || 'Doc'}, Page: ${c.page_number}] ${c.text}`)
       .join('\n\n');
 
     const primaryDocName = docs[0]?.filename || 'Uploaded Documents';
-    const ai = await getAIProvider();
+    // Honor client-provided credentials like every other AI route.
+    const ai = await getAIProvider({
+      apiKey: body.apiKey || req.headers.get('x-api-key') || undefined,
+      provider: body.provider || req.headers.get('x-provider') || undefined,
+      model: body.model || req.headers.get('x-model') || undefined,
+      baseUrl: body.baseUrl || req.headers.get('x-base-url') || undefined,
+    });
     let generatedData: any = null;
 
     switch (artifactType) {
@@ -132,6 +140,9 @@ export async function POST(req: Request) {
           { role: 'user', content: prompt.user },
         ]);
         if (data.flashcards && data.flashcards.length > 0) {
+          // Replace the deck instead of appending — regenerating used to
+          // duplicate every card on every click.
+          await deleteFlashcardsByNotebook(notebookId);
           const cards: FlashcardRecord[] = data.flashcards.map((c, i) => ({
             id: `fc_regen_${Date.now()}_${i}`,
             notebook_id: notebookId,

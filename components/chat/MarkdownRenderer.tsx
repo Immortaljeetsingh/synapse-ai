@@ -407,17 +407,24 @@ function parseMarkdownSpans(text: string): React.ReactNode[] {
     else if (part.startsWith('[') && part.includes('](') && part.endsWith(')')) {
       const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (linkMatch) {
+        const href = linkMatch[2].trim();
+        // Block script/data URLs — AI output is untrusted input
+        const isSafe = /^(https?:|mailto:|\/|#)/i.test(href);
         spans.push(
-          <a
-            key={idx}
-            href={linkMatch[2]}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-neutral-900 dark:text-white underline decoration-neutral-400 hover:decoration-white font-medium inline-flex items-center gap-0.5"
-          >
-            {linkMatch[1]}
-            <ExternalLink className="w-2.5 h-2.5" />
-          </a>
+          isSafe ? (
+            <a
+              key={idx}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-neutral-900 dark:text-white underline decoration-neutral-400 hover:decoration-white font-medium inline-flex items-center gap-0.5"
+            >
+              {linkMatch[1]}
+              <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+          ) : (
+            <span key={idx}>{part}</span>
+          )
         );
       } else {
         spans.push(<span key={idx}>{part}</span>);

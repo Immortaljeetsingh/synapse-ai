@@ -99,7 +99,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'No document text found in this notebook. Please upload a document first.' }, { status: 400 });
     }
 
-    const notesPrompt = PROMPTS.DOCUMENT_DEEP_NOTES_AND_AUDIT(docName, combinedText.slice(0, 25000));
+    // Sample evenly across the corpus so notes cover the whole notebook,
+    // not just its first pages.
+    const targetChars = 60000;
+    let sampledText = combinedText;
+    if (combinedText.length > targetChars && chunks.length > 0) {
+      const perChunk = Math.max(300, Math.floor(targetChars / chunks.length));
+      sampledText = chunks
+        .map((c) => c.text.slice(0, perChunk))
+        .join('\n\n')
+        .slice(0, targetChars);
+    }
+    const notesPrompt = PROMPTS.DOCUMENT_DEEP_NOTES_AND_AUDIT(docName, sampledText);
     const res = await ai.generateStructuredJson<{
       notes: Array<{ title: string; format_type?: string; content?: string; points?: string[] }>;
     }>([

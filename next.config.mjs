@@ -7,12 +7,17 @@ const nextConfig = {
     },
   },
   webpack: (config, { isServer }) => {
-    config.resolve.fallback = {
-      ...config.resolve.fallback,
-      fs: false,
-      path: false,
-      crypto: false,
-    };
+    // Stub node builtins for the CLIENT bundle only. Applying `fs: false` to
+    // the server build too would break any bundled server code that touches
+    // the filesystem (API routes rely on fs/path/crypto).
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
+      };
+    }
     return config;
   },
 };

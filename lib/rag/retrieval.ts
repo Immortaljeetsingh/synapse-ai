@@ -244,48 +244,44 @@ export async function multiStageDeepRetrieve(
   userQuery: string,
   options: { documentFilterId?: string; externalChunks?: any[] } = {}
 ): Promise<RetrievalResult> {
-  // Define comprehensive analytical passes
+  // Domain-neutral analytical passes. The previous hardcoded set baked
+  // NGO/grant-management vocabulary (donor reporting, M&E, RACI) into every
+  // deep-research query, wasting passes and polluting context for any other
+  // document domain.
   const subtopicPasses = [
     {
-      name: 'Lifecycle & Sourcing',
+      name: 'Core Concepts & Definitions',
       queries: [
-        `${userQuery} lifecycle stages opportunity identification sourcing qualification due diligence`,
-        'process stages workflow phase step discovery selection',
+        `${userQuery}`,
+        'definition meaning concept overview introduction what is',
       ],
     },
     {
-      name: 'Governance & Decision Gates',
+      name: 'Process & Structure',
       queries: [
-        'decision gates approval criteria go no-go sign-off governance escalation committee',
-        'risk assessment compliance clearance thresholds authorization',
+        'process stages workflow steps phases structure framework methodology',
+        'procedure requirements criteria rules guidelines',
       ],
     },
     {
-      name: 'Monitoring & KPIs',
+      name: 'Metrics & Evidence',
       queries: [
-        'performance monitoring review cycles KPIs indicators metrics tracking milestones variance RAG status',
-        'evaluation ongoing review progress tracking operational benchmarks',
-      ],
-    },
-    {
-      name: 'Reporting & Timelines',
-      queries: [
-        'reporting frequency reporting cycles donor reporting financial narrative submission deadlines schedule timeline T+',
-        'reconciliation validation quality review submission approval',
+        'metrics KPIs indicators measurements targets results data numbers thresholds',
+        'performance evaluation monitoring tracking benchmarks',
       ],
     },
     {
       name: 'Roles & Responsibilities',
       queries: [
-        'roles responsibilities partnerships team finance programme M&E grants leadership coordinator lead reviewer',
-        'ownership accountability RACI matrix delegation',
+        'roles responsibilities team ownership accountability approval governance',
+        'organization department function duties lead coordinator',
       ],
     },
     {
-      name: 'Risks, Gaps & Contradictions',
+      name: 'Risks, Gaps & Exceptions',
       queries: [
-        'risks challenges bottlenecks friction gaps limitations issues assumptions errors discrepancies inconsistencies',
-        'vulnerabilities audit constraints missing data',
+        'risks challenges limitations gaps issues exceptions constraints assumptions',
+        'problems errors discrepancies inconsistencies vulnerabilities',
       ],
     },
   ];

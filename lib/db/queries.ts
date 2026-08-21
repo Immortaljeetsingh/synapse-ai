@@ -39,7 +39,13 @@ export async function queryOne<T = any>(sql: string, params: any[] = []): Promis
 // Helper to run INSERT / UPDATE / DELETE queries and save
 export async function runQuery(sql: string, params: any[] = []): Promise<void> {
   const db = await getDb();
-  db.run(sql, params);
+  // sql.js only executes the FIRST statement when params are passed — omit
+  // params entirely for parameterless SQL so multi-statement strings still work.
+  if (params.length > 0) {
+    db.run(sql, params);
+  } else {
+    db.run(sql);
+  }
   saveDb();
 }
 
@@ -99,6 +105,17 @@ export async function updateNotebook(
 }
 
 export async function deleteNotebook(id: string): Promise<boolean> {
+  // Explicit cascade — never rely on PRAGMA foreign_keys being enforced.
+  await runQuery(`DELETE FROM document_chunks WHERE document_id IN (SELECT id FROM documents WHERE notebook_id = ?)`, [id]);
+  await runQuery(`DELETE FROM documents WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE notebook_id = ?)`, [id]);
+  await runQuery(`DELETE FROM chat_sessions WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM notes WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM flashcards WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM quiz_attempts WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM quizzes WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM questions WHERE notebook_id = ?`, [id]);
+  await runQuery(`DELETE FROM generated_artifacts WHERE notebook_id = ?`, [id]);
   await runQuery(`DELETE FROM notebooks WHERE id = ?`, [id]);
   return true;
 }
@@ -189,6 +206,9 @@ export async function updateDocumentStatus(
 }
 
 export async function deleteDocument(id: string): Promise<boolean> {
+  // Explicit cascade — never rely on PRAGMA foreign_keys being enforced.
+  await runQuery(`DELETE FROM document_chunks WHERE document_id = ?`, [id]);
+  await runQuery(`DELETE FROM questions WHERE document_id = ?`, [id]);
   await runQuery(`DELETE FROM documents WHERE id = ?`, [id]);
   return true;
 }

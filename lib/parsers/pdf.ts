@@ -50,9 +50,12 @@ export async function parsePdf(filePath: string): Promise<ParsedDocumentResult> 
     });
   }
 
-  // Tier 1: Page-by-page structured extraction
+  // Tier 1: Page-by-page structured extraction.
+  // pdf-parse's per-page hook is `pagerender` (NOT `pager`) — verified against
+  // node_modules/pdf-parse/lib/pdf-parse.js. Using the wrong key silently
+  // disables page tracking and collapses every PDF to a single "page 1".
   try {
-    const data = await (pdfParse as any)(dataBuffer, { pager });
+    const data = await (pdfParse as any)(dataBuffer, { pagerender: pager });
     const totalPages = data.numpages || pages.length || 1;
     const fullText = data.text || pages.map((p) => p.text).join('\n\n');
     const trimmedFullText = fullText.trim();
