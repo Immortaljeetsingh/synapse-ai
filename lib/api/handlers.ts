@@ -118,7 +118,6 @@ function detectIntent(message: string): {
     lower.includes('comprehensive analysis') ||
     lower.includes('detailed analysis') ||
     lower.includes('detailed report') ||
-    lower.includes('in detail') ||
     lower.includes('exhaustive') ||
     lower.includes('compare the documents') ||
     lower.includes('cross-document') ||
@@ -340,12 +339,35 @@ async function handleChat(req: Request) {
         { maxTokens: 16000 }
       );
       replyText = completion.text;
-      groundingType = 'direct_source';
-      specialPayload = {
-        type: 'research_analysis',
-        evidenceCount: deepRetrieval.chunks.length,
-        evidenceMap: deepRetrieval.evidenceMap,
-      };
+
+      // Same fabrication guard as chat: a "research report" sharing almost
+      // no vocabulary with the retrieved evidence is general-knowledge
+      // hallucination, not document analysis.
+      const stopWords = new Set(['the','and','for','that','this','with','from','have','has','its','are','was','were','been','their','they','which','will','would','could','should','there','these','those','then','than','when','what','where','while','about','into','over','also','only','very','more','most','such','each','both','between','because','after','before','under','above','other','some','all','any','not','but','can','may','must','does','did','doing','being']);
+      const evidenceVocab = new Set(
+        ((deepRetrieval.chunks.slice(0, 5).map((c) => c.text).join(' ') || '').toLowerCase().match(/[a-z]{4,}/g)) || []
+      );
+      const reportWords = (replyText.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w) => !stopWords.has(w));
+      const reportOverlap =
+        reportWords.length > 0
+          ? reportWords.filter((w) => evidenceVocab.has(w)).length / reportWords.length
+          : 0;
+      if (deepRetrieval.chunks.length === 0 || reportOverlap < 0.1) {
+        replyText =
+          "**I couldn't find sufficient evidence in the uploaded documents to write this research report.**\n\n" +
+          'Deep analysis requires your question to relate to the uploaded sources. Try asking about a topic your documents actually cover.';
+        groundingType = 'not_in_document';
+        citations = [];
+        specialPayload = null;
+        retrievedChunksForResponse = [];
+      } else {
+        groundingType = 'direct_source';
+        specialPayload = {
+          type: 'research_analysis',
+          evidenceCount: deepRetrieval.chunks.length,
+          evidenceMap: deepRetrieval.evidenceMap,
+        };
+      }
     } else if (intentData.intent === 'flashcards') {
       const retrieval = await hybridRetrieve(notebookId, message, {
         topK: 8,
