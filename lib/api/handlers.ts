@@ -536,12 +536,23 @@ async function handleChat(req: Request) {
         // ([name.ext, p. X]); general-knowledge rambles don't.
         const hasCitationMarker = /\[[^\]\n]{2,80}\.(docx|pdf|txt|md|csv|xlsx|xls)[^\]\n]*\]/i.test(replyText);
         const hasHedge = hedgePhrases.some((p) => lowerReply.includes(p));
-        // Weak retrieval + an answer that cites nothing = fabrication from
-        // general knowledge. Confident fabrication (no hedge) is caught here
-        // too, because grounded answers are instructed to always cite.
+        // Vocabulary-overlap check: a genuinely grounded answer reuses the
+        // document's own words; general-knowledge fabrications share almost
+        // no content vocabulary with the retrieved chunks.
+        const STOP_WORDS = new Set(['the','and','for','that','this','with','from','have','has','its','are','was','were','been','their','they','which','will','would','could','should','there','these','those','then','than','when','what','where','while','about','into','over','also','only','very','more','most','such','each','both','between','because','after','before','under','above','other','some','all','any','not','but','can','may','must','does','did','doing','being']);
+        const evidenceWords = new Set(
+          ((retrieval.chunks.slice(0, 3).map((c) => c.text).join(' ') || '').toLowerCase().match(/[a-z]{4,}/g)) || []
+        );
+        const replyContentWords = (lowerReply.match(/[a-z]{4,}/g) || []).filter((w) => !STOP_WORDS.has(w));
+        const vocabOverlap =
+          replyContentWords.length > 0
+            ? replyContentWords.filter((w) => evidenceWords.has(w)).length / replyContentWords.length
+            : 0;
+
         const looksLikeRefusal =
           (hasHedge && !hasCitationMarker) ||
-          (!hasCitationMarker && topScore < 0.15);
+          (!hasCitationMarker && topScore < 0.15) ||
+          vocabOverlap < 0.1;
 
         if (looksLikeRefusal) {
           // The model ignored grounding instructions and answered from
