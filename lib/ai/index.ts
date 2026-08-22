@@ -21,7 +21,7 @@ export async function getAIProvider(overrides?: {
   // apiKey from headers) used to skip the DB lookup entirely and jump the
   // remaining fields back to hardcoded defaults.
   let provider = process.env.AI_PROVIDER || process.env.OPENCODE_ZEN_PROVIDER || 'openrouter';
-  let model = process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'openai/gpt-oss-20b:free';
+  let model = process.env.AI_MODEL || process.env.OPENCODE_ZEN_MODEL || 'dots-studio/dots-3-note-preview:free';
   let apiKey = process.env.AI_API_KEY || process.env.OPENCODE_ZEN_API_KEY || '';
   let baseUrl = process.env.AI_BASE_URL || process.env.OPENCODE_ZEN_BASE_URL || 'https://openrouter.ai/api/v1';
 

@@ -77,6 +77,8 @@ export class OpenRouterProvider extends BaseAIProvider {
         }
 
         let full = '';
+        let reasoningBuf = '';
+        let sawContent = false;
         const onDelta = options.onDelta;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -100,15 +102,20 @@ export class OpenRouterProvider extends BaseAIProvider {
             throw new Error(`OpenRouter stream error: ${msg}`);
           }
           const choice = json.choices?.[0];
-          const delta =
-            choice?.delta?.content ||
-            choice?.delta?.reasoning ||
-            choice?.delta?.reasoning_content ||
-            choice?.text ||
-            '';
-          if (delta) {
-            full += delta;
-            onDelta(delta);
+          // Reasoning tokens are tracked separately and NEVER streamed to the
+          // user — models like dots emit chain-of-thought deltas first, and
+          // concatenating them leaked "Thinking Process:" into answers.
+          const reasoningDelta =
+            choice?.delta?.reasoning || choice?.delta?.reasoning_content || '';
+          const contentDelta = choice?.delta?.content || choice?.text || '';
+          if (reasoningDelta && !contentDelta) {
+            reasoningBuf += reasoningDelta;
+            return;
+          }
+          if (contentDelta) {
+            sawContent = true;
+            full += contentDelta;
+            onDelta(contentDelta);
           }
         };
         while (true) {
@@ -123,6 +130,10 @@ export class OpenRouterProvider extends BaseAIProvider {
         parseLine(buffer);
         for (const line of decoder.decode().split('\n')) parseLine(line);
         if (!full.trim()) {
+          // Some reasoning-only models never emit content — fall back.
+          if (reasoningBuf.trim()) {
+            return { text: reasoningBuf, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+          }
           throw new Error(`OpenRouter model '${this.model}' returned an empty stream.`);
         }
         return { text: full, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };

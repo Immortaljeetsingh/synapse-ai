@@ -57,6 +57,10 @@ import {
 
 const json = (data: any, status = 200) => NextResponse.json(data, { status });
 
+// User-facing validation failure inside runChat — surfaced as a clean 400
+// (or SSE error event) instead of a 500.
+class ValidationError extends Error {}
+
 // ponytail: in-memory 1h cache for free OpenRouter models — no DB, no extra deps.
 let freeModelsCache: { at: number; models: { id: string; name: string; context_length: number | null; description: string }[] } | null = null;
 
@@ -345,7 +349,12 @@ async function handleChat(req: Request) {
     });
   }
 
-  const result = await runChat(req, body);
+  const result = await runChat(req, body).catch((err: unknown) => {
+    if (err instanceof ValidationError) {
+      throw Object.assign(new Error(err.message), { statusCode: 400 });
+    }
+    throw err;
+  });
   return json(result);
 }
 
@@ -474,8 +483,14 @@ async function runChat(
       citations = retrieval.citations;
 
       const cardCount = intentData.count || 8;
-      // Cap context — oversized contexts blow past the 60s function limit.
-      const context = (retrieval.groundedContextText || message).slice(0, 12000);
+      // NEVER fall back to the user's message as source — that generated
+      // flashcards ABOUT the request instead of FROM the document.
+      if (retrieval.chunks.length === 0 || !retrieval.groundedContextText?.trim()) {
+        throw new ValidationError(
+          "I couldn't find document content for flashcards. Upload a document first, then try again."
+        );
+      }
+      const context = retrieval.groundedContextText.slice(0, 12000);
       const prompt = PROMPTS.FLASHCARDS(context, cardCount);
       const res = await ai.generateStructuredJson<{ flashcards: any[] }>([
         { role: 'system', content: prompt.system },
@@ -523,7 +538,12 @@ async function runChat(
       citations = retrieval.citations;
 
       const qCount = intentData.count || 10;
-      const context = (retrieval.groundedContextText || message).slice(0, 14000);
+      if (retrieval.chunks.length === 0 || !retrieval.groundedContextText?.trim()) {
+        throw new ValidationError(
+          "I couldn't find document content to quiz you on. Upload a document first, then try again."
+        );
+      }
+      const context = retrieval.groundedContextText.slice(0, 14000);
       const prompt = PROMPTS.GAMIFIED_QUIZ_GENERATION(context, {
         count: qCount,
         difficulty: 'medium',
@@ -1356,6 +1376,14 @@ export async function handleApi(req: Request): Promise<Response> {
         headings: Array.isArray(p?.headings) ? p.headings.map(String) : [],
       }));
       const fullText = cleanPages.map((p: any) => p.text).join('\n\n');
+      // Reject empty/near-empty extractions — a previous bug accepted them
+      // with success:true, leaving the user with an unusable "invisible" doc.
+      if (fullText.replace(/\s+/g, '').length < 20) {
+        return json(
+          { success: false, error: 'No readable text found in the document. The file may be empty or image-only.' },
+          400
+        );
+      }
 
       if (fullText.length > MAX_TEXT_CHARS) {
         return json(
@@ -1812,7 +1840,7 @@ export async function handleApi(req: Request): Promise<Response> {
     if (resource === 'settings' && !second) {
       if (method === 'GET') {
         const provider = await getSetting('ai_provider', process.env.AI_PROVIDER || 'openrouter');
-        const model = await getSetting('ai_model', process.env.AI_MODEL || 'openai/gpt-oss-20b:free');
+        const model = await getSetting('ai_model', process.env.AI_MODEL || 'dots-studio/dots-3-note-preview:free');
         const baseUrl = await getSetting('ai_base_url', process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1');
         const hasApiKey = Boolean(await getSetting('ai_api_key', process.env.AI_API_KEY || ''));
         return json({ success: true, settings: { provider, model, baseUrl, hasApiKey } });
@@ -1920,7 +1948,10 @@ export async function handleApi(req: Request): Promise<Response> {
 
     return json({ success: false, error: `Not found: ${method} ${url.pathname}` }, 404);
   } catch (err: any) {
-    console.error(`API error [${method} ${url.pathname}]:`, err);
-    return json({ success: false, error: err.message }, 500);
+    const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
+    if (status >= 500) {
+      console.error(`API error [${method} ${url.pathname}]:`, err);
+    }
+    return json({ success: false, error: err.message }, status);
   }
 }

@@ -137,6 +137,7 @@ export class OpenCodeZenProvider extends BaseAIProvider {
       const reader = streamBody.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let reasoningBuf = '';
       const parseLine = (line: string) => {
         const trimmed = line.trim();
         if (!trimmed.startsWith('data:')) return;
@@ -156,15 +157,17 @@ export class OpenCodeZenProvider extends BaseAIProvider {
           throw new Error(`OpenCode Zen stream error: ${msg}`);
         }
         const choice = json.choices?.[0];
-        const delta =
-          choice?.delta?.content ||
-          choice?.delta?.reasoning ||
-          choice?.delta?.reasoning_content ||
-          choice?.text ||
-          '';
-        if (delta) {
-          full += delta;
-          onDelta(delta);
+        // Reasoning tokens tracked separately — never streamed to the user.
+        const reasoningDelta =
+          choice?.delta?.reasoning || choice?.delta?.reasoning_content || '';
+        const contentDelta = choice?.delta?.content || choice?.text || '';
+        if (reasoningDelta && !contentDelta) {
+          reasoningBuf += reasoningDelta;
+          return;
+        }
+        if (contentDelta) {
+          full += contentDelta;
+          onDelta(contentDelta);
         }
       };
       while (true) {
@@ -179,6 +182,12 @@ export class OpenCodeZenProvider extends BaseAIProvider {
       parseLine(buffer);
       for (const line of decoder.decode().split('\n')) parseLine(line);
       if (!full.trim()) {
+        if (reasoningBuf.trim()) {
+          return {
+            text: reasoningBuf,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          };
+        }
         throw new Error('OpenCode Zen returned an empty stream.');
       }
       return {

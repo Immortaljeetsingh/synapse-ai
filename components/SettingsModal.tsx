@@ -12,7 +12,7 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [provider, setProvider] = useState('openrouter');
-  const [model, setModel] = useState('openai/gpt-oss-20b:free');
+  const [model, setModel] = useState('dots-studio/dots-3-note-preview:free');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('https://openrouter.ai/api/v1');
 
@@ -65,24 +65,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const res = await fetch('/api/settings');
       const data = await res.json();
       let p = 'openrouter';
-      let m = 'openai/gpt-oss-20b:free';
+      let m = 'dots-studio/dots-3-note-preview:free';
       let b = 'https://openrouter.ai/api/v1';
 
       if (data.success && data.settings) {
         // localStorage is the source of truth on the client; server only fills gaps
         p = localStorage.getItem('synapse_provider') || data.settings.provider || 'openrouter';
-        m = localStorage.getItem('synapse_model') || data.settings.model || 'openai/gpt-oss-20b:free';
+        m = localStorage.getItem('synapse_model') || data.settings.model || 'dots-studio/dots-3-note-preview:free';
         b = localStorage.getItem('synapse_base_url') || data.settings.baseUrl || 'https://openrouter.ai/api/v1';
       } else {
         p = localStorage.getItem('synapse_provider') || 'openrouter';
-        m = localStorage.getItem('synapse_model') || 'openai/gpt-oss-20b:free';
+        m = localStorage.getItem('synapse_model') || 'dots-studio/dots-3-note-preview:free';
         b = localStorage.getItem('synapse_base_url') || 'https://openrouter.ai/api/v1';
       }
 
       // Auto-correct any mismatched legacy opencodezen URL when OpenRouter is selected
       if (p === 'openrouter' && (b.includes('opencodezen') || m.includes('deepseek-v4-flash-max'))) {
         b = 'https://openrouter.ai/api/v1';
-        m = 'openai/gpt-oss-20b:free';
+        m = 'dots-studio/dots-3-note-preview:free';
         localStorage.setItem('synapse_base_url', b);
         localStorage.setItem('synapse_model', m);
       }
@@ -253,7 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <label className="block text-neutral-300 font-medium mb-1.5">Provider Presets</label>
             <div className="grid grid-cols-3 gap-1.5">
               {[
-                { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-oss-20b:free' },
+                { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', defaultModel: 'dots-studio/dots-3-note-preview:free' },
                 { id: 'opencode_zen', name: 'OpenCode Zen', url: 'https://opencode.ai/zen/v1', defaultModel: 'deepseek-v4-flash-free' },
                 { id: 'openai', name: 'OpenAI', url: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
                 { id: 'groq', name: 'Groq Cloud', url: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
@@ -291,7 +291,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 setProvider(e.target.value);
                 if (e.target.value === 'openrouter') {
                   setBaseUrl('https://openrouter.ai/api/v1');
-                  setModel('openai/gpt-oss-20b:free');
+                  setModel('dots-studio/dots-3-note-preview:free');
                 } else if (e.target.value === 'opencode_zen') {
                   setBaseUrl('https://opencode.ai/zen/v1');
                   setModel('deepseek-v4-flash-free');
