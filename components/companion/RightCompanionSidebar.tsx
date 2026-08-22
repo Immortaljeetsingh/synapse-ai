@@ -28,7 +28,7 @@ import { OverviewTab } from '@/components/tabs/OverviewTab';
 import { NotesTab } from '@/components/tabs/NotesTab';
 import { FlashcardsTab } from '@/components/tabs/FlashcardsTab';
 import { StudyGuideTab } from '@/components/tabs/StudyGuideTab';
-import { QuizTab } from '@/components/tabs/QuizTab';
+import { QuizTab, PrepStatus, PreGeneratedQuiz } from '@/components/tabs/QuizTab';
 import { CompareTab } from '@/components/tabs/CompareTab';
 import { SourcesTab } from '@/components/tabs/SourcesTab';
 
@@ -68,6 +68,9 @@ interface RightCompanionSidebarProps {
   onDeleteDocument: (docId: string) => Promise<void>;
   onOpenViewer: (doc: DocumentRecord) => void;
   isUploading?: boolean;
+  preGeneratedQuiz?: PreGeneratedQuiz | null;
+  prepStatus?: PrepStatus | null;
+  onConsumePreGeneratedQuiz?: () => void;
 }
 
 export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
@@ -95,6 +98,9 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
   onDeleteDocument,
   onOpenViewer,
   isUploading = false,
+  preGeneratedQuiz,
+  prepStatus,
+  onConsumePreGeneratedQuiz,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [generatingTypes, setGeneratingTypes] = useState<Set<string>>(new Set());
@@ -178,15 +184,20 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
       {/* Main Tab Viewport */}
       <div className="flex-1 overflow-y-auto bg-neutral-950 p-4">
         {activeTab === 'overview' && (
-          <OverviewTab
-            overview={artifacts.overview || null}
-            topics={artifacts.topics || []}
-            concepts={artifacts.concepts || []}
-            numbers={artifacts.numbers || []}
-            isLoading={generatingTypes.has('overview')}
-            onAskQuestion={onAskQuestion}
-            onRegenerate={handleRegenerate}
-          />
+          <div className="space-y-2">
+            {prepStatus?.overview === 'pending' && (
+              <div className="text-[11px] text-neutral-500">Preparing overview…</div>
+            )}
+            <OverviewTab
+              overview={artifacts.overview || null}
+              topics={artifacts.topics || []}
+              concepts={artifacts.concepts || []}
+              numbers={artifacts.numbers || []}
+              isLoading={generatingTypes.has('overview')}
+              onAskQuestion={onAskQuestion}
+              onRegenerate={handleRegenerate}
+            />
+          </div>
         )}
 
         {activeTab === 'notes' && (
@@ -200,11 +211,16 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
         )}
 
         {activeTab === 'flashcards' && (
-          <FlashcardsTab
-            flashcards={flashcards}
-            onUpdateStatus={onUpdateFlashcardStatus}
-            onRegenerate={() => onRegenerateArtifact('flashcards')}
-          />
+          <div className="space-y-2">
+            {prepStatus?.flashcards === 'pending' && (
+              <div className="text-[11px] text-neutral-500">Building flashcards…</div>
+            )}
+            <FlashcardsTab
+              flashcards={flashcards}
+              onUpdateStatus={onUpdateFlashcardStatus}
+              onRegenerate={() => onRegenerateArtifact('flashcards')}
+            />
+          </div>
         )}
 
         {activeTab === 'study_guide' && (
@@ -222,6 +238,9 @@ export const RightCompanionSidebar: React.FC<RightCompanionSidebarProps> = ({
             weakTopics={weakTopics}
             attempts={quizAttempts}
             onStartQuizConfig={onStartQuizConfig}
+            preGeneratedQuiz={preGeneratedQuiz}
+            prepStatus={prepStatus}
+            onConsumePreGeneratedQuiz={onConsumePreGeneratedQuiz}
           />
         )}
 

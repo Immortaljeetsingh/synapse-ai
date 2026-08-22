@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   History,
   TrendingUp,
+  Loader2,
 } from 'lucide-react';
 import {
   QuizQuestionItem,
@@ -24,6 +25,18 @@ import {
 import { QuizConfigModal } from '@/components/quiz/QuizConfigModal';
 import { QuizHistoryView } from '@/components/quiz/QuizHistoryView';
 
+export type PrepStatus = {
+  overview?: 'pending' | 'done' | 'failed';
+  flashcards?: 'pending' | 'done' | 'failed';
+  quiz?: 'pending' | 'done' | 'failed';
+};
+
+export type PreGeneratedQuiz = {
+  title: string;
+  questions: QuizQuestionItem[];
+  quizId?: string | null;
+};
+
 interface QuizTabProps {
   documents: DocumentRecord[];
   topicPerformance: TopicPerformanceRecord[];
@@ -31,6 +44,9 @@ interface QuizTabProps {
   attempts: QuizAttemptRecord[];
   onStartQuizConfig: (config: QuizConfig) => Promise<void>;
   isGenerating?: boolean;
+  preGeneratedQuiz?: PreGeneratedQuiz | null;
+  prepStatus?: PrepStatus | null;
+  onConsumePreGeneratedQuiz?: () => void;
 }
 
 export const QuizTab: React.FC<QuizTabProps> = ({
@@ -40,6 +56,9 @@ export const QuizTab: React.FC<QuizTabProps> = ({
   attempts = [],
   onStartQuizConfig,
   isGenerating = false,
+  preGeneratedQuiz,
+  prepStatus,
+  onConsumePreGeneratedQuiz,
 }) => {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [presetConfig, setPresetConfig] = useState<Partial<QuizConfig>>({});
@@ -64,6 +83,40 @@ export const QuizTab: React.FC<QuizTabProps> = ({
 
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto select-none">
+      {/* Pre-generated quiz ready banner */}
+      {preGeneratedQuiz && (
+        <div className="bg-neutral-900 border border-emerald-700/50 rounded-3xl p-6 shadow-3d relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1.5 min-w-0">
+              <div className="text-sm font-bold text-emerald-300 flex items-center gap-2">
+                <Zap className="w-4 h-4" />
+                Quiz ready — generated from your upload
+              </div>
+              <div className="font-bold text-neutral-100 truncate">{preGeneratedQuiz.title}</div>
+              <div className="text-xs text-neutral-400 font-mono">
+                {preGeneratedQuiz.questions.length} question{preGeneratedQuiz.questions.length === 1 ? '' : 's'}
+              </div>
+            </div>
+            <button
+              onClick={onConsumePreGeneratedQuiz}
+              className="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold text-sm shadow-3d flex items-center justify-center gap-2.5 transition-all transform active:scale-95 shrink-0"
+            >
+              <Gamepad2 className="w-5 h-5" />
+              <span>Start Quiz Now</span>
+            </button>
+          </div>
+          <div className="text-[11px] text-neutral-500 mt-3">or customize below</div>
+        </div>
+      )}
+
+      {/* Background generation spinner */}
+      {prepStatus?.quiz === 'pending' && (
+        <div className="flex items-center gap-2 text-xs text-neutral-400">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
+          Generating practice quiz in background…
+        </div>
+      )}
+
       {/* Hero Interactive Quiz Launcher Card */}
       <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-8 shadow-3d-lg relative overflow-hidden">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">

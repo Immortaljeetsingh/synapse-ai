@@ -22,6 +22,7 @@ import { DocumentDrawer } from '@/components/chat/DocumentDrawer';
 import { LibraryModal } from '@/components/chat/LibraryModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { RightCompanionSidebar, CompanionTab } from '@/components/companion/RightCompanionSidebar';
+import { PrepStatus, PreGeneratedQuiz } from '@/components/tabs/QuizTab';
 import { QuizGameEngine } from '@/components/quiz/QuizGameEngine';
 import { QuizResultsDashboard } from '@/components/quiz/QuizResultsDashboard';
 import { QuizAnswerReview } from '@/components/quiz/QuizAnswerReview';
@@ -143,6 +144,10 @@ export default function ChatStudioWorkspace() {
   const [quizAttempts, setQuizAttempts] = useState<QuizAttemptRecord[]>([]);
   const [topicPerformance, setTopicPerformance] = useState<TopicPerformanceRecord[]>([]);
   const [weakTopics, setWeakTopics] = useState<string[]>([]);
+  // Background study-material pre-generation (kicked off after each upload)
+  const [preGeneratedQuiz, setPreGeneratedQuiz] = useState<PreGeneratedQuiz | null>(null);
+  const [prepStatus, setPrepStatus] = useState<PrepStatus | null>(null);
+  const preGenInFlight = useRef<Set<string>>(new Set());
 
   // UI Panels State
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -316,6 +321,8 @@ export default function ChatStudioWorkspace() {
     setFlashcards(b.flashcards);
     setChatMessages(b.messages);
     setQuizAttempts(b.attempts);
+    setPreGeneratedQuiz(null);
+    setPrepStatus(null);
     const { performance, weakTopics } = computeTopicPerformance(b.attempts);
     setTopicPerformance(performance);
     setWeakTopics(weakTopics);
@@ -404,6 +411,119 @@ export default function ChatStudioWorkspace() {
     return pages;
   };
 
+  // Fire-and-forget background pre-generation of study materials for a freshly
+  // uploaded doc. Failures are silent (console.warn) — this is a convenience,
+  // never something that should alert or block the user.
+  const preGenerateStudyMaterials = async (nbId: string, doc: LocalDocument) => {
+    // ponytail: session-scoped dedupe Set; server mints fresh doc ids on
+    // re-upload so keys never need eviction.
+    const key = `${nbId}:${doc.id}`;
+    if (preGenInFlight.current.has(key)) return;
+    preGenInFlight.current.add(key);
+
+    const setStatus = (
+      what: 'overview' | 'flashcards' | 'quiz',
+      state: 'pending' | 'done' | 'failed'
+    ) => setPrepStatus((prev) => ({ ...prev, [what]: state }));
+
+    try {
+      const docChunks = buildSlimChunks([doc]);
+      if (docChunks.reduce((n, c) => n + c.text.length, 0) < 500) return;
+      // Quiz covers the whole notebook: read all docs fresh from the persisted
+      // bundle (this doc was merged in before we were called).
+      const bundle =
+        (await idbGet<NotebookBundle>(nbBundleKey(nbId))) || emptyBundle();
+      const allChunks = buildSlimChunks(bundle.documents);
+
+      // (a) Overview artifact
+      setStatus('overview', 'pending');
+      try {
+        const res = await fetch('/api/artifacts', {
+          method: 'POST',
+          headers: getAIHeaders(),
+          body: JSON.stringify({
+            notebookId: nbId,
+            artifactType: 'overview',
+            chunks: docChunks,
+          }),
+        });
+        const data = await res.json();
+        if (data.success && data.artifact) {
+          setArtifacts((prev) => ({ ...prev, overview: data.artifact }));
+          await mutateBundle(nbId, (b) => ({
+            artifacts: { ...b.artifacts, overview: data.artifact },
+          }));
+          setStatus('overview', 'done');
+        } else {
+          setStatus('overview', 'failed');
+        }
+      } catch (e) {
+        console.warn('Background overview generation failed:', e);
+        setStatus('overview', 'failed');
+      }
+
+      // (b) Flashcards deck — response artifact IS the cards array
+      setStatus('flashcards', 'pending');
+      try {
+        const res = await fetch('/api/artifacts', {
+          method: 'POST',
+          headers: getAIHeaders(),
+          body: JSON.stringify({
+            notebookId: nbId,
+            artifactType: 'flashcards',
+            chunks: docChunks,
+          }),
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.artifact) && data.artifact.length > 0) {
+          setFlashcards((prev) => [...data.artifact, ...prev]);
+          await mutateBundle(nbId, (b) => ({
+            flashcards: [...data.artifact, ...b.flashcards],
+          }));
+          setStatus('flashcards', 'done');
+        } else {
+          setStatus('flashcards', 'failed');
+        }
+      } catch (e) {
+        console.warn('Background flashcard generation failed:', e);
+        setStatus('flashcards', 'failed');
+      }
+
+      // (c) Default quiz — stored aside only; no attempt posted, nothing
+      // activated. The quiz row itself is created by the endpoint.
+      setStatus('quiz', 'pending');
+      try {
+        const res = await fetch('/api/quiz/generate', {
+          method: 'POST',
+          headers: getAIHeaders(),
+          body: JSON.stringify({
+            notebookId: nbId,
+            questionCount: 10,
+            difficulty: 'medium',
+            sourceType: 'notebook',
+            chunks: allChunks,
+          }),
+        });
+        const data = await res.json();
+        if (data.success && data.questions?.length > 0) {
+          setPreGeneratedQuiz({
+            title: data.quiz?.title || 'Pre-built Quiz',
+            questions: data.questions,
+            quizId: data.quiz?.id || null,
+          });
+          setStatus('quiz', 'done');
+        } else {
+          setStatus('quiz', 'failed');
+        }
+      } catch (e) {
+        console.warn('Background quiz generation failed:', e);
+        setStatus('quiz', 'failed');
+      }
+    } finally {
+      preGenInFlight.current.delete(key);
+    }
+  };
+
   const handleUploadFiles = async (files: FileList) => {
     if (!activeNotebookId) return;
     setIsUploading(true);
@@ -440,6 +560,9 @@ export default function ChatStudioWorkspace() {
           await mutateBundle(activeNotebookId, (b) => ({
             documents: [newDoc, ...b.documents.filter((d) => d.id !== newDoc.id)],
           }));
+          // Fire-and-forget: pre-build overview/flashcards/quiz in the
+          // background so they're ready when the user opens the tabs.
+          preGenerateStudyMaterials(activeNotebookId, newDoc);
         } catch (uploadErr: any) {
           failures++;
           console.error(`Upload failed for ${file.name}:`, uploadErr);
@@ -1032,6 +1155,30 @@ export default function ChatStudioWorkspace() {
           setIsDrawerOpen(true);
         }}
         isUploading={isUploading}
+        preGeneratedQuiz={preGeneratedQuiz}
+        prepStatus={prepStatus}
+        onConsumePreGeneratedQuiz={() => {
+          // Launch the pre-built quiz directly — no regeneration.
+          const pq = preGeneratedQuiz;
+          if (!pq?.questions?.length) return;
+          setQuizQuestions(pq.questions);
+          setQuizTitle(pq.title);
+          setActiveQuizId(pq.quizId || null);
+          setQuizConfig({
+            sourceType: 'notebook',
+            questionCount: pq.questions.length,
+            difficulty: 'medium',
+            questionType: 'mixed',
+            mode: 'practice',
+            timerSeconds: 0,
+            enableXp: true,
+            enableStreaks: true,
+          });
+          setQuizResults(null);
+          setIsReviewingAnswers(false);
+          setIsQuizActive(true);
+          setPreGeneratedQuiz(null);
+        }}
       />
 
       {/* Global Knowledge Search (Cmd/Ctrl+K) — runs on local scope */}

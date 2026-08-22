@@ -239,8 +239,9 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
             type="button"
             disabled={!input.trim() || isLoading}
             onClick={handleSend}
-            className="w-8 h-8 rounded-full bg-neutral-900 dark:bg-neutral-700 hover:bg-neutral-800 dark:hover:bg-neutral-600 disabled:opacity-30 text-white flex items-center justify-center transition-all shadow-3d-sm active:scale-95 shrink-0"
+            aria-label="Send message"
             title="Send Message"
+            className="w-9 h-9 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 disabled:opacity-40 flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0"
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
