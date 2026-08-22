@@ -241,12 +241,12 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
             onClick={handleSend}
             aria-label="Send message"
             title="Send Message"
-            className="w-9 h-9 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 disabled:opacity-40 flex items-center justify-center transition-all shadow-md active:scale-95 shrink-0"
+            className="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white border-2 border-indigo-400/60 dark:border-indigo-400/40 shadow-lg shadow-indigo-600/30 disabled:bg-neutral-400 disabled:dark:bg-neutral-700 disabled:border-transparent disabled:shadow-none flex items-center justify-center transition-all active:scale-95 shrink-0"
           >
             {isLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
-              <ArrowUp className="w-4 h-4" />
+              <ArrowUp className="w-5 h-5" />
             )}
           </button>
         </div>
