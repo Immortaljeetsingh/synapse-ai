@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Check, Server, Shield, Cpu, RefreshCw, Key, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { X, Check, Cpu, RefreshCw, AlertCircle, CheckCircle2, Search, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react';
 import { SynapseLogo } from '@/components/brand/SynapseLogo';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 
@@ -19,6 +19,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Free OpenRouter model picker state
+  const [freeModels, setFreeModels] = useState<{ id: string; name: string; context_length: number | null; description: string }[]>([]);
+  const [freeModelsLoading, setFreeModelsLoading] = useState(false);
+  const [freeModelsError, setFreeModelsError] = useState<string | null>(null);
+  const [modelSearch, setModelSearch] = useState('');
+  const [showFreePicker, setShowFreePicker] = useState(false);
+  const [selectedFreeId, setSelectedFreeId] = useState('');
 
   const checkHealth = useCallback(
     async (customConfig?: { provider?: string; model?: string; apiKey?: string; baseUrl?: string }) => {
@@ -91,6 +99,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       console.error('Error loading settings:', e);
     }
   }, []);
+
+  const fetchFreeModels = useCallback(async () => {
+    setFreeModelsLoading(true);
+    setFreeModelsError(null);
+    try {
+      const res = await fetch('/api/models/openrouter/free');
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to load free models');
+      setFreeModels(data.models || []);
+    } catch (e: any) {
+      setFreeModelsError(e.message || 'Failed to fetch models');
+    } finally {
+      setFreeModelsLoading(false);
+    }
+  }, []);
+
+  const filteredFreeModels = useMemo(() => {
+    const q = modelSearch.trim().toLowerCase();
+    if (!q) return freeModels;
+    return freeModels.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  }, [freeModels, modelSearch]);
+
+  // Keep selectedFreeId in sync with current model field when picker opens
+  useEffect(() => {
+    if (showFreePicker && model) setSelectedFreeId(model);
+  }, [showFreePicker, model]);
+
+  useEffect(() => {
+    if (showFreePicker && freeModels.length === 0 && !freeModelsLoading && !freeModelsError) {
+      fetchFreeModels();
+    }
+  }, [showFreePicker, freeModels.length, freeModelsLoading, freeModelsError, fetchFreeModels]);
 
   // Run the load+health sequence ONLY when the modal opens. checkHealth's
   // identity changes on every keystroke (it reads provider/model state), so
@@ -309,6 +349,105 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               placeholder="Model name or ID (e.g. gpt-4o, deepseek-chat, llama-3.3-70b)"
               className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-200 font-mono focus:outline-none focus:border-neutral-600"
             />
+          </div>
+
+          {/* Free OpenRouter Model Picker */}
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowFreePicker((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-neutral-900 transition-colors"
+            >
+              <span className="flex items-center gap-2 text-[11px] font-semibold text-neutral-200">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                Free OpenRouter Models
+                {freeModels.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-[10px] font-mono">{freeModels.length}</span>
+                )}
+              </span>
+              <span className="flex items-center gap-1 text-neutral-500">
+                <span className="text-[10px] hidden sm:inline">{showFreePicker ? 'Hide' : 'Browse'}</span>
+                {showFreePicker ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </span>
+            </button>
+
+            {showFreePicker && (
+              <div className="px-3 pb-3 space-y-2 border-t border-neutral-800 pt-2.5">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" />
+                  <input
+                    type="text"
+                    value={modelSearch}
+                    onChange={(e) => setModelSearch(e.target.value)}
+                    placeholder="Search by id or name..."
+                    className="w-full pl-8 pr-3 py-2 bg-neutral-900 border border-neutral-800 rounded-xl text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:border-neutral-600 text-xs"
+                  />
+                </div>
+
+                {freeModelsLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-6 text-neutral-400 text-xs">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Loading free models...
+                  </div>
+                ) : freeModelsError ? (
+                  <div className="py-3 text-center space-y-2">
+                    <p className="text-rose-400 text-xs">{freeModelsError}</p>
+                    <button type="button" onClick={fetchFreeModels} className="px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs">
+                      Retry
+                    </button>
+                  </div>
+                ) : filteredFreeModels.length === 0 ? (
+                  <p className="py-6 text-center text-neutral-500 text-xs">{freeModels.length === 0 ? 'No free models found.' : 'No matches.'}</p>
+                ) : (
+                  <>
+                    <div className="max-h-56 overflow-y-auto rounded-xl border border-neutral-800 divide-y divide-neutral-800 bg-neutral-900">
+                      {filteredFreeModels.map((m) => {
+                        const isSelected = selectedFreeId === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedFreeId(m.id);
+                              setModel(m.id);
+                            }}
+                            className={`w-full text-left px-3 py-2 hover:bg-neutral-800 transition-colors ${isSelected ? 'bg-neutral-800 border-l-2 border-amber-400' : ''}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-[11px] text-neutral-100 truncate">{m.id}</span>
+                              {m.context_length ? (
+                                <span className="shrink-0 text-[10px] font-mono text-neutral-500">{(m.context_length / 1000).toFixed(0)}k</span>
+                              ) : null}
+                            </div>
+                            <div className="text-[11px] text-neutral-400 truncate">{m.name}</div>
+                            {m.description ? <div className="text-[10px] text-neutral-500 line-clamp-1">{m.description.slice(0, 120)}</div> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-neutral-500 font-mono truncate flex-1">
+                        {selectedFreeId ? `Selected: ${selectedFreeId}` : 'Pick a model above'}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!selectedFreeId}
+                        onClick={() => {
+                          if (!selectedFreeId) return;
+                          setProvider('openrouter');
+                          setBaseUrl('https://openrouter.ai/api/v1');
+                          setModel(selectedFreeId);
+                        }}
+                        className="shrink-0 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-neutral-800 disabled:text-neutral-500 text-neutral-900 font-semibold text-xs transition-colors"
+                      >
+                        Use selected
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-neutral-500">Save Settings to persist. Survives reload via localStorage/server.</p>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

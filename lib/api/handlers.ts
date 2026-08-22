@@ -57,6 +57,40 @@ import {
 
 const json = (data: any, status = 200) => NextResponse.json(data, { status });
 
+// ponytail: in-memory 1h cache for free OpenRouter models — no DB, no extra deps.
+let freeModelsCache: { at: number; models: { id: string; name: string; context_length: number | null; description: string }[] } | null = null;
+
+async function handleOpenRouterFreeModels(): Promise<Response> {
+  if (freeModelsCache && Date.now() - freeModelsCache.at < 60 * 60 * 1000) {
+    return json({ success: true, models: freeModelsCache.models });
+  }
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models', { cache: 'no-store' });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      return json({ success: false, error: `OpenRouter fetch failed (${res.status}): ${txt.slice(0, 200)}` }, 500);
+    }
+    const data = await res.json();
+    const list = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
+    const free = list.filter((m: any) => {
+      const promptPrice = m?.pricing?.prompt;
+      const isFreePrice = promptPrice != null && Number(promptPrice) === 0;
+      const isFreeId = typeof m?.id === 'string' && m.id.includes(':free');
+      return isFreePrice || isFreeId;
+    });
+    const models = free.map((m: any) => ({
+      id: String(m.id || ''),
+      name: String(m.name || m.id || ''),
+      context_length: typeof m.context_length === 'number' ? m.context_length : (typeof m.contextLength === 'number' ? m.contextLength : null),
+      description: String(m.description || ''),
+    }));
+    freeModelsCache = { at: Date.now(), models };
+    return json({ success: true, models });
+  } catch (e: any) {
+    return json({ success: false, error: e?.message || 'Failed to fetch OpenRouter models' }, 500);
+  }
+}
+
 const CREDENTIAL_HEADERS = (req: Request, body: any = {}) => ({
   apiKey: body.apiKey || req.headers.get('x-api-key') || undefined,
   provider: body.provider || req.headers.get('x-provider') || undefined,
@@ -1841,6 +1875,11 @@ export async function handleApi(req: Request): Promise<Response> {
 
       await setCachedArtifact(notebookId, 'comparison', comparison);
       return json({ success: true, comparison });
+    }
+
+    // ---------- /api/models/openrouter/free ----------
+    if (resource === 'models' && second === 'openrouter' && third === 'free' && method === 'GET') {
+      return await handleOpenRouterFreeModels();
     }
 
     // ---------- /api/ai/health ----------
